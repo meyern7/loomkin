@@ -106,6 +106,7 @@ defmodule Loom.Teams.Agent do
         }
 
         Context.register_agent(team_id, name, %{role: role, status: :idle, model: model})
+        broadcast_team(state, {:agent_status, state.name, :idle})
 
         {:ok, state}
 
@@ -278,7 +279,13 @@ defmodule Loom.Teams.Agent do
           model = ModelRouter.select(state.role, %{id: task.id, description: task.description})
           state = %{state | task: %{id: task.id, description: task.description, title: task.title}, model: model}
           messages = maybe_prefetch_context(state, state.task)
-          {:noreply, %{state | messages: messages}}
+          state = %{state | messages: messages}
+
+          if state.status == :idle do
+            send(self(), {:auto_execute_task, task_id})
+          end
+
+          {:noreply, state}
 
         {:error, _} ->
           Logger.warning("[Agent:#{state.name}] Could not fetch task #{task_id}")
@@ -287,6 +294,48 @@ defmodule Loom.Teams.Agent do
     else
       Logger.debug("[Agent:#{state.name}] Task #{task_id} assigned to #{agent_name}")
       {:noreply, state}
+    end
+  end
+
+  @impl true
+  def handle_info({:auto_execute_task, task_id}, state) do
+    if state.status != :idle do
+      Logger.debug("[Agent:#{state.name}] Skipping auto-execute for #{task_id} — status is #{state.status}")
+      {:noreply, state}
+    else
+      task = state.task
+      description = task[:description] || task[:title] || "Complete task #{task_id}"
+      Logger.info("[Agent:#{state.name}] Auto-executing task #{task_id}")
+
+      state = set_status(state, :working)
+      broadcast_team(state, {:agent_status, state.name, :working})
+
+      user_message = %{role: :user, content: description}
+      messages = state.messages ++ [user_message]
+      loop_opts = build_loop_opts(state)
+
+      case AgentLoop.run(messages, loop_opts) do
+        {:ok, response_text, messages, metadata} ->
+          state = %{state | messages: messages, failure_count: 0}
+          state = track_usage(state, metadata)
+          Loom.Teams.Tasks.complete_task(task_id, response_text)
+          state = set_status(state, :idle)
+          broadcast_team(state, {:agent_status, state.name, :idle})
+          {:noreply, state}
+
+        {:error, reason, messages} ->
+          Logger.error("[Agent:#{state.name}] Task #{task_id} failed: #{inspect(reason)}")
+          state = %{state | messages: messages}
+          Loom.Teams.Tasks.fail_task(task_id, inspect(reason))
+          state = set_status(state, :idle)
+          broadcast_team(state, {:agent_status, state.name, :idle})
+          {:noreply, state}
+
+        {:pending_permission, _info, messages} ->
+          state = %{state | messages: messages}
+          state = set_status(state, :idle)
+          {:noreply, state}
+      end
     end
   end
 

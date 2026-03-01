@@ -27,12 +27,13 @@ defmodule Loom.Tools.TeamSpawn do
     team_name = param!(params, :team_name)
     template = param(params, :template)
     project_path = param(params, :project_path) || param(context, :project_path)
+    parent_team_id = param(context, :parent_team_id)
 
     if template do
       spawn_from_template(team_name, template, project_path)
     else
       roles = param!(params, :roles)
-      spawn_from_roles(team_name, roles, project_path)
+      spawn_from_roles(team_name, roles, project_path, parent_team_id)
     end
   end
 
@@ -63,8 +64,13 @@ defmodule Loom.Tools.TeamSpawn do
     end
   end
 
-  defp spawn_from_roles(team_name, roles, project_path) do
-    {:ok, team_id} = Manager.create_team(name: team_name, project_path: project_path)
+  defp spawn_from_roles(team_name, roles, project_path, parent_team_id \\ nil) do
+    {:ok, team_id} =
+      if parent_team_id do
+        Manager.create_sub_team(parent_team_id, "architect", name: team_name, project_path: project_path)
+      else
+        Manager.create_team(name: team_name, project_path: project_path)
+      end
 
     results =
       Enum.map(roles, fn role_map ->

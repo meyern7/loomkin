@@ -16,7 +16,8 @@ defmodule Loom.Session do
     :team_id,
     messages: [],
     tools: [],
-    auto_approve: false
+    auto_approve: false,
+    child_team_ids: []
   ]
 
   # --- Public API ---
@@ -179,6 +180,22 @@ defmodule Loom.Session do
   end
 
   @impl true
+  def handle_info({:child_team_created, child_team_id}, state) do
+    Logger.info("[Session] Child team created: #{child_team_id} for session #{state.id}")
+    Phoenix.PubSub.subscribe(Loom.PubSub, "team:#{child_team_id}:tasks")
+    child_ids = [child_team_id | state.child_team_ids] |> Enum.uniq()
+    broadcast(state.id, {:child_team_available, state.id, child_team_id})
+    {:noreply, %{state | child_team_ids: child_ids}}
+  end
+
+  @impl true
+  def handle_info({:task_completed, _task_id, _agent_name, _result} = event, state) do
+    # Check if this completion means all tasks in a child team are done
+    check_child_team_completion(state, event)
+    {:noreply, state}
+  end
+
+  @impl true
   def handle_info(_msg, state) do
     {:noreply, state}
   end
@@ -244,6 +261,46 @@ defmodule Loom.Session do
 
   defp default_model do
     Application.get_env(:loom, :default_model, "anthropic:claude-sonnet-4-6")
+  end
+
+  defp check_child_team_completion(state, _event) do
+    for child_team_id <- state.child_team_ids do
+      tasks = Loom.Teams.Tasks.list_all(child_team_id)
+
+      if tasks != [] && Enum.all?(tasks, fn t -> t.status in [:completed, :failed] end) do
+        results =
+          tasks
+          |> Enum.filter(fn t -> t.status == :completed end)
+          |> Enum.map(fn t -> "- **#{t.title}**: #{t.result || "done"}" end)
+          |> Enum.join("\n")
+
+        failed =
+          tasks
+          |> Enum.filter(fn t -> t.status == :failed end)
+          |> Enum.map(fn t -> "- **#{t.title}**: #{t.result || "failed"}" end)
+          |> Enum.join("\n")
+
+        summary = """
+        ## Team Results
+
+        #{if results != "", do: "### Completed\n#{results}\n", else: ""}#{if failed != "", do: "### Failed\n#{failed}\n", else: ""}
+        """
+
+        msg = %{role: :assistant, content: String.trim(summary)}
+
+        Persistence.save_message(%{
+          session_id: state.id,
+          role: :assistant,
+          content: String.trim(summary)
+        })
+
+        broadcast(state.id, {:new_message, state.id, msg})
+        Logger.info("[Session] Child team #{child_team_id} completed — results sent to chat")
+      end
+    end
+  rescue
+    e ->
+      Logger.error("[Session] Error checking child team completion: #{Exception.message(e)}")
   end
 
   defp broadcast(session_id, event) do

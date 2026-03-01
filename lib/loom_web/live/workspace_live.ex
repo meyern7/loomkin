@@ -3,6 +3,7 @@ defmodule LoomWeb.WorkspaceLive do
 
   alias Loom.Session
   alias Loom.Session.Manager
+  alias Loom.Teams
 
   require Logger
 
@@ -25,6 +26,8 @@ defmodule LoomWeb.WorkspaceLive do
         permission_request: nil,
         page_title: "Loom Workspace",
         team_id: params["team_id"],
+        child_teams: [],
+        active_team_id: params["team_id"],
         team_sub_tab: :activity
       )
 
@@ -70,8 +73,11 @@ defmodule LoomWeb.WorkspaceLive do
       team_id = socket.assigns[:team_id]
 
       if team_id do
-        Phoenix.PubSub.subscribe(Loom.PubSub, "team:#{team_id}")
-        Phoenix.PubSub.subscribe(Loom.PubSub, "team:#{team_id}:tasks")
+        subscribe_to_team(team_id)
+
+        # Recover child teams from previous pageloads
+        child_ids = Teams.Manager.list_sub_teams(team_id)
+        Enum.each(child_ids, &subscribe_to_team/1)
       end
     end
 
@@ -84,6 +90,11 @@ defmodule LoomWeb.WorkspaceLive do
 
     session_metrics = Loom.Telemetry.Metrics.session_metrics(session_id)
 
+    # Recover child teams if backing team exists
+    team_id = socket.assigns[:team_id]
+    child_teams = if team_id, do: Teams.Manager.list_sub_teams(team_id), else: []
+    active_team_id = socket.assigns[:active_team_id] || team_id
+
     assign(socket,
       session_id: session_id,
       project_path: project_path,
@@ -91,7 +102,9 @@ defmodule LoomWeb.WorkspaceLive do
       messages: messages,
       session_cost: session_metrics.cost_usd,
       session_tokens: session_metrics.prompt_tokens + session_metrics.completion_tokens,
-      page_title: "Loom - #{short_id(session_id)}"
+      page_title: "Loom - #{short_id(session_id)}",
+      child_teams: child_teams,
+      active_team_id: active_team_id
     )
   end
 
@@ -143,6 +156,10 @@ defmodule LoomWeb.WorkspaceLive do
     {:noreply, assign(socket, team_sub_tab: String.to_existing_atom(tab))}
   end
 
+  def handle_event("switch_team", %{"team-id" => team_id}, socket) do
+    {:noreply, assign(socket, active_team_id: team_id)}
+  end
+
   # --- PubSub Info ---
 
   def handle_info({:new_message, _session_id, msg}, socket) do
@@ -191,12 +208,21 @@ defmodule LoomWeb.WorkspaceLive do
 
   def handle_info({:team_available, _session_id, team_id}, socket) do
     # Auto-subscribe to backing team events when the team is created
-    if connected?(socket) do
-      Phoenix.PubSub.subscribe(Loom.PubSub, "team:#{team_id}")
-      Phoenix.PubSub.subscribe(Loom.PubSub, "team:#{team_id}:tasks")
-    end
+    if connected?(socket), do: subscribe_to_team(team_id)
+    {:noreply, assign(socket, team_id: team_id, active_team_id: team_id)}
+  end
 
-    {:noreply, assign(socket, team_id: team_id)}
+  def handle_info({:child_team_available, _session_id, child_team_id}, socket) do
+    if connected?(socket), do: subscribe_to_team(child_team_id)
+
+    child_teams =
+      if child_team_id in socket.assigns.child_teams do
+        socket.assigns.child_teams
+      else
+        socket.assigns.child_teams ++ [child_team_id]
+      end
+
+    {:noreply, assign(socket, :child_teams, child_teams)}
   end
 
   def handle_info({:architect_phase, _phase}, socket) do
@@ -244,32 +270,73 @@ defmodule LoomWeb.WorkspaceLive do
 
   # Team PubSub events -- forward to team components via send_update
   def handle_info({:agent_status, _agent_name, _status}, socket) do
-    if socket.assigns[:team_id] do
-      send_update(LoomWeb.TeamDashboardComponent, id: "team-dashboard", team_id: socket.assigns.team_id)
-      send_update(LoomWeb.TeamActivityComponent, id: "team-activity", team_id: socket.assigns.team_id)
-    end
-
+    forward_to_team_components(socket)
     {:noreply, socket}
   end
 
-  def handle_info({:task_assigned, _task_id, _agent_name} = _msg, socket) do
-    if socket.assigns[:team_id] do
-      send_update(LoomWeb.TeamDashboardComponent, id: "team-dashboard", team_id: socket.assigns.team_id)
-    end
-
+  def handle_info({:task_assigned, _task_id, _agent_name}, socket) do
+    forward_to_dashboard(socket)
     {:noreply, socket}
   end
 
-  def handle_info({:task_completed, _task_id, _agent_name, _result} = _msg, socket) do
-    if socket.assigns[:team_id] do
-      send_update(LoomWeb.TeamDashboardComponent, id: "team-dashboard", team_id: socket.assigns.team_id)
-    end
-
+  def handle_info({:task_completed, _task_id, _agent_name, _result}, socket) do
+    forward_to_dashboard(socket)
+    forward_to_cost(socket)
     {:noreply, socket}
   end
 
-  def handle_info({:team_dissolved, _team_id}, socket) do
-    {:noreply, assign(socket, team_id: nil, active_tab: :files)}
+  def handle_info({:task_started, _task_id, _owner}, socket) do
+    forward_to_dashboard(socket)
+    {:noreply, socket}
+  end
+
+  def handle_info({:task_failed, _task_id, _owner, _reason}, socket) do
+    forward_to_dashboard(socket)
+    {:noreply, socket}
+  end
+
+  def handle_info({:role_changed, _agent_name, _old, _new}, socket) do
+    forward_to_dashboard(socket)
+    {:noreply, socket}
+  end
+
+  def handle_info({:agent_escalation, _agent_name, _old, _new}, socket) do
+    forward_to_dashboard(socket)
+    forward_to_cost(socket)
+    {:noreply, socket}
+  end
+
+  def handle_info({:usage, _agent_name, _payload}, socket) do
+    forward_to_cost(socket)
+    {:noreply, socket}
+  end
+
+  def handle_info({:child_team_created, child_team_id}, socket) do
+    if connected?(socket), do: subscribe_to_team(child_team_id)
+
+    child_teams =
+      if child_team_id in socket.assigns.child_teams do
+        socket.assigns.child_teams
+      else
+        socket.assigns.child_teams ++ [child_team_id]
+      end
+
+    {:noreply, assign(socket, :child_teams, child_teams)}
+  end
+
+  def handle_info({:team_dissolved, team_id}, socket) do
+    if team_id == socket.assigns.team_id do
+      {:noreply, assign(socket, team_id: nil, child_teams: [], active_team_id: nil, active_tab: :files)}
+    else
+      child_teams = List.delete(socket.assigns.child_teams, team_id)
+
+      active_team_id =
+        if socket.assigns.active_team_id == team_id,
+          do: socket.assigns.team_id,
+          else: socket.assigns.active_team_id
+
+      {:noreply, assign(socket, child_teams: child_teams, active_team_id: active_team_id)}
+    end
   end
 
   # Telemetry metrics update
@@ -523,12 +590,40 @@ defmodule LoomWeb.WorkspaceLive do
   end
 
   defp render_tab(:team, assigns) do
+    display_team_id = assigns[:active_team_id] || assigns[:team_id]
+    assigns = assign(assigns, :display_team_id, display_team_id)
+
     ~H"""
     <div class="flex flex-col h-full gap-3">
+      <%!-- Team switcher (visible when child teams exist) --%>
+      <div :if={@child_teams != []} class="flex items-center gap-1 flex-wrap border-b border-gray-800 pb-2">
+        <button
+          phx-click="switch_team"
+          phx-value-team-id={@team_id}
+          class={"text-xs px-2.5 py-1 rounded-lg font-medium transition " <>
+            if(@active_team_id == @team_id,
+              do: "bg-violet-600 text-white",
+              else: "bg-gray-800 text-gray-400 hover:text-gray-200")}
+        >
+          Lead
+        </button>
+        <button
+          :for={child_id <- @child_teams}
+          phx-click="switch_team"
+          phx-value-team-id={child_id}
+          class={"text-xs px-2.5 py-1 rounded-lg font-medium transition " <>
+            if(@active_team_id == child_id,
+              do: "bg-violet-600 text-white",
+              else: "bg-gray-800 text-gray-400 hover:text-gray-200")}
+        >
+          {short_team_id(child_id)}
+        </button>
+      </div>
+
       <.live_component
         module={LoomWeb.TeamDashboardComponent}
         id="team-dashboard"
-        team_id={@team_id}
+        team_id={@display_team_id}
       />
 
       <div class="flex items-center gap-1 border-b border-gray-800 pb-1">
@@ -561,7 +656,7 @@ defmodule LoomWeb.WorkspaceLive do
     <.live_component
       module={LoomWeb.TeamActivityComponent}
       id="team-activity"
-      team_id={@team_id}
+      team_id={@display_team_id}
     />
     """
   end
@@ -571,7 +666,7 @@ defmodule LoomWeb.WorkspaceLive do
     <.live_component
       module={LoomWeb.TeamCostComponent}
       id="team-cost"
-      team_id={@team_id}
+      team_id={@display_team_id}
     />
     """
   end
@@ -585,6 +680,30 @@ defmodule LoomWeb.WorkspaceLive do
     />
     """
   end
+
+  defp subscribe_to_team(team_id) do
+    Phoenix.PubSub.subscribe(Loom.PubSub, "team:#{team_id}")
+    Phoenix.PubSub.subscribe(Loom.PubSub, "team:#{team_id}:tasks")
+  end
+
+  defp forward_to_team_components(socket) do
+    forward_to_dashboard(socket)
+    tid = socket.assigns[:active_team_id] || socket.assigns[:team_id]
+    if tid, do: send_update(LoomWeb.TeamActivityComponent, id: "team-activity", team_id: tid)
+  end
+
+  defp forward_to_dashboard(socket) do
+    tid = socket.assigns[:active_team_id] || socket.assigns[:team_id]
+    if tid, do: send_update(LoomWeb.TeamDashboardComponent, id: "team-dashboard", team_id: tid)
+  end
+
+  defp forward_to_cost(socket) do
+    tid = socket.assigns[:active_team_id] || socket.assigns[:team_id]
+    if tid, do: send_update(LoomWeb.TeamCostComponent, id: "team-cost", team_id: tid)
+  end
+
+  defp short_team_id(id) when is_binary(id), do: String.slice(id, 0, 8)
+  defp short_team_id(_), do: "?"
 
   defp ensure_index_started(project_path) do
     case GenServer.whereis(Loom.RepoIntel.Index) do

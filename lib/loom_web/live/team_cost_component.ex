@@ -162,6 +162,34 @@ defmodule LoomWeb.TeamCostComponent do
     end
   end
 
+  # --- PubSub handlers (forwarded from parent LiveView via send_update) ---
+
+  def handle_info({:usage, _agent_name, _payload}, socket) do
+    {:noreply, load_cost_data(socket)}
+  end
+
+  def handle_info({:agent_escalation, agent_name, old_model, new_model}, socket) do
+    escalation = %{
+      agent: agent_name,
+      from: old_model,
+      to: new_model,
+      at: DateTime.utc_now()
+    }
+
+    {:noreply,
+     socket
+     |> assign(:escalations, socket.assigns.escalations ++ [escalation])
+     |> load_cost_data()}
+  end
+
+  def handle_info({:task_completed, _task_id, _agent_name, _result}, socket) do
+    {:noreply, load_cost_data(socket)}
+  end
+
+  def handle_info(_msg, socket) do
+    {:noreply, socket}
+  end
+
   @impl true
   def render(assigns) do
     ~H"""

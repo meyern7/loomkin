@@ -78,9 +78,82 @@ defmodule LoomWeb.TeamDashboardComponent do
   defp to_float(n) when is_number(n), do: n / 1
   defp to_float(_), do: 0.0
 
-  # --- PubSub handlers (forwarded from parent LiveView via handle_info) ---
-  # LiveComponents receive PubSub messages through the parent process.
-  # The parent should forward relevant messages via send_update/3.
+  # --- PubSub handlers (forwarded from parent LiveView via send_update) ---
+
+  def handle_info({:agent_status, agent_name, status}, socket) do
+    agents =
+      Enum.map(socket.assigns.agents, fn agent ->
+        if agent.name == agent_name, do: %{agent | status: status}, else: agent
+      end)
+
+    {:noreply, assign(socket, :agents, agents)}
+  end
+
+  def handle_info({:task_assigned, _task_id, agent_name}, socket) do
+    {:noreply, reload_tasks(socket, agent_name)}
+  end
+
+  def handle_info({:task_completed, _task_id, agent_name, _result}, socket) do
+    {:noreply, reload_tasks(socket, agent_name)}
+  end
+
+  def handle_info({:task_started, _task_id, owner}, socket) do
+    {:noreply, reload_tasks(socket, owner)}
+  end
+
+  def handle_info({:task_failed, _task_id, owner, _reason}, socket) do
+    {:noreply, reload_tasks(socket, owner)}
+  end
+
+  def handle_info({:role_changed, agent_name, _old_role, new_role}, socket) do
+    agents =
+      Enum.map(socket.assigns.agents, fn agent ->
+        if agent.name == agent_name, do: %{agent | role: new_role}, else: agent
+      end)
+
+    {:noreply, assign(socket, :agents, agents)}
+  end
+
+  def handle_info({:agent_escalation, agent_name, _old_model, _new_model}, socket) do
+    # Escalation may affect budget — reload cost data
+    summary = CostTracker.team_cost_summary(socket.assigns.team_id)
+    spent = to_float(summary.total_cost_usd)
+    budget_limit = socket.assigns.budget[:limit] || 5.0
+
+    agents =
+      Enum.map(socket.assigns.agents, fn agent ->
+        if agent.name == agent_name, do: %{agent | status: :working}, else: agent
+      end)
+
+    {:noreply,
+     socket
+     |> assign(:agents, agents)
+     |> assign(:budget, %{spent: spent, limit: budget_limit})}
+  end
+
+  def handle_info(_msg, socket) do
+    {:noreply, socket}
+  end
+
+  defp reload_tasks(socket, agent_name) do
+    team_id = socket.assigns.team_id
+    tasks = Tasks.list_all(team_id)
+    current_task = find_agent_current_task(team_id, agent_name)
+
+    agents =
+      Enum.map(socket.assigns.agents, fn agent ->
+        if agent.name == agent_name, do: %{agent | current_task: current_task}, else: agent
+      end)
+
+    summary = CostTracker.team_cost_summary(team_id)
+    spent = to_float(summary.total_cost_usd)
+    budget_limit = socket.assigns.budget[:limit] || 5.0
+
+    socket
+    |> assign(:tasks, tasks)
+    |> assign(:agents, agents)
+    |> assign(:budget, %{spent: spent, limit: budget_limit})
+  end
 
   @impl true
   def render(assigns) do

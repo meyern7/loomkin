@@ -143,7 +143,7 @@ defmodule Loom.Session.Architect do
         if classified.type == :tool_calls do
           Logger.info("[Architect] Planning phase invoked tools — executing team operations")
           update_usage(state.id, response)
-          handle_planning_tool_calls(classified, response, provider, model_id, req_messages, state, opts)
+          handle_planning_tool_calls(classified, response, provider, model_id, req_messages, state, opts, user_text)
         else
           text = extract_text(response)
           Logger.debug("[Architect] Plan response received, parsing... (#{String.length(text)} chars)")
@@ -201,42 +201,97 @@ defmodule Loom.Session.Architect do
   # --- Private ---
 
   # Handle tool calls from the planning phase (e.g. team_spawn, team_assign).
-  # Executes tools and returns the result as a conversational response.
-  defp handle_planning_tool_calls(classified, _response, _provider, _model_id, _req_messages, state, _opts) do
+  # Executes tools, bootstraps lead agent with user request, notifies session.
+  defp handle_planning_tool_calls(classified, _response, _provider, _model_id, _req_messages, state, _opts, user_text) do
     tool_calls = classified.tool_calls
     tool_names = Enum.map(tool_calls, fn tc -> tc[:name] || tc["name"] end)
     Logger.info("[Architect] Planning tools: #{Enum.join(tool_names, ", ")}")
 
-    results =
-      Enum.map(tool_calls, fn tool_call ->
+    {results, spawned_team_ids} =
+      Enum.reduce(tool_calls, {[], []}, fn tool_call, {res, team_ids} ->
         tool_name = tool_call[:name] || tool_call["name"]
         tool_args = tool_call[:arguments] || tool_call["arguments"] || %{}
-        context = %{project_path: state.project_path, session_id: state.id}
+        context = %{project_path: state.project_path, session_id: state.id, parent_team_id: state.team_id}
 
         case Jido.AI.ToolAdapter.lookup_action(tool_name, @planning_tools) do
           {:ok, tool_module} ->
-            run_and_format_tool(tool_module, tool_args, context)
+            normalized_args = atomize_keys(tool_args)
+
+            case Jido.Exec.run(tool_module, normalized_args, context, timeout: 60_000) do
+              {:ok, %{team_id: tid, result: text}} ->
+                {res ++ [text], team_ids ++ [tid]}
+
+              {:ok, %{result: text}} ->
+                {res ++ [text], team_ids}
+
+              {:ok, text} when is_binary(text) ->
+                {res ++ [text], team_ids}
+
+              {:error, reason} ->
+                {res ++ ["Error: #{inspect(reason)}"], team_ids}
+            end
 
           {:error, :not_found} ->
-            "Error: Planning tool '#{tool_name}' not found"
+            {res ++ ["Error: Planning tool '#{tool_name}' not found"], team_ids}
         end
       end)
 
     response_text = Enum.join(results, "\n\n")
 
+    # Bootstrap: send the user's request to each spawned team's lead agent
+    for team_id <- spawned_team_ids do
+      bootstrap_team_lead(team_id, user_text)
+
+      # Notify the session about this child team
+      if state.id do
+        case Loom.Session.Manager.find_session(state.id) do
+          {:ok, session_pid} -> send(session_pid, {:child_team_created, team_id})
+          :error -> :ok
+        end
+      end
+    end
+
+    status_text =
+      if spawned_team_ids != [] do
+        "Team working on your request...\n\n#{response_text}"
+      else
+        response_text
+      end
+
     {:ok, _} =
       Persistence.save_message(%{
         session_id: state.id,
         role: :assistant,
-        content: response_text
+        content: status_text
       })
 
-    assistant_msg = %{role: :assistant, content: response_text}
+    assistant_msg = %{role: :assistant, content: status_text}
     state = %{state | messages: state.messages ++ [assistant_msg]}
     broadcast(state.id, {:new_message, state.id, assistant_msg})
 
     # Signal that the team was spawned — run/3 should not fall back to conversational
-    {:ok, %{"plan" => [], "summary" => response_text, "team_spawned" => true}, state}
+    {:ok, %{"plan" => [], "summary" => status_text, "team_spawned" => true}, state}
+  end
+
+  # Find and message the lead agent (or first agent) in a newly spawned team.
+  defp bootstrap_team_lead(team_id, user_text) do
+    alias Loom.Teams.{Agent, Manager}
+
+    agents = Manager.list_agents(team_id)
+
+    lead =
+      Enum.find(agents, fn a -> a.role == :lead end) ||
+        List.first(agents)
+
+    if lead do
+      Logger.info("[Architect] Bootstrapping lead agent #{lead.name} in team #{team_id}")
+
+      Task.Supervisor.start_child(Loom.Teams.TaskSupervisor, fn ->
+        Agent.send_message(lead.pid, user_text)
+      end)
+    else
+      Logger.warning("[Architect] No agents found in team #{team_id} to bootstrap")
+    end
   end
 
   defp conversational_fallback(user_text, state, model) do
