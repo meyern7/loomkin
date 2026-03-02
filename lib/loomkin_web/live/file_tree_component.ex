@@ -10,14 +10,35 @@ defmodule LoomkinWeb.FileTreeComponent do
     {:ok,
      assign(socket,
        tree: [],
+       full_tree: [],
        expanded_dirs: MapSet.new(),
        filter: "",
        file_count: 0,
-       total_size: 0
+       total_size: 0,
+       loading: false,
+       scan_task: nil
      )}
   end
 
   @impl true
+  def update(%{__async_result__: {tree, file_count, total_size}}, socket) do
+    filtered_tree =
+      case socket.assigns.filter do
+        "" -> tree
+        f -> filter_tree(tree, String.downcase(f))
+      end
+
+    {:ok,
+     assign(socket,
+       tree: filtered_tree,
+       full_tree: tree,
+       file_count: file_count,
+       total_size: total_size,
+       loading: false,
+       scan_task: nil
+     )}
+  end
+
   def update(assigns, socket) do
     previous_path = socket.assigns[:project_path]
     socket = assign(socket, assigns)
@@ -25,20 +46,8 @@ defmodule LoomkinWeb.FileTreeComponent do
     project_path = assigns[:project_path]
 
     if project_path && project_path != "" && project_path != previous_path do
-      {tree, file_count, total_size} = build_tree(project_path)
-
-      filtered_tree =
-        case socket.assigns.filter do
-          "" -> tree
-          f -> filter_tree(tree, String.downcase(f))
-        end
-
-      {:ok,
-       assign(socket,
-         tree: filtered_tree,
-         file_count: file_count,
-         total_size: total_size
-       )}
+      socket = cancel_scan(socket)
+      {:ok, start_async_scan(socket, project_path)}
     else
       {:ok, socket}
     end
@@ -64,23 +73,17 @@ defmodule LoomkinWeb.FileTreeComponent do
   end
 
   def handle_event("filter", %{"filter" => value}, socket) do
-    project_path = socket.assigns.project_path
-
-    {tree, _count, _size} = build_tree(project_path)
-
     filtered_tree =
       case value do
-        "" -> tree
-        f -> filter_tree(tree, String.downcase(f))
+        "" -> socket.assigns.full_tree
+        f -> filter_tree(socket.assigns.full_tree, String.downcase(f))
       end
 
     {:noreply, assign(socket, filter: value, tree: filtered_tree)}
   end
 
   def handle_event("clear_filter", _params, socket) do
-    project_path = socket.assigns.project_path
-    {tree, _count, _size} = build_tree(project_path)
-    {:noreply, assign(socket, filter: "", tree: tree)}
+    {:noreply, assign(socket, filter: "", tree: socket.assigns.full_tree)}
   end
 
   @impl true
@@ -114,10 +117,17 @@ defmodule LoomkinWeb.FileTreeComponent do
       </div>
 
       <div class="flex-1 overflow-y-auto px-1 py-1 text-sm font-mono">
-        <%= if @tree == [] do %>
-          <p class="px-3 py-4 text-gray-500 text-center text-xs">No files indexed</p>
+        <%= if @loading do %>
+          <div class="flex items-center justify-center gap-2 px-3 py-6">
+            <div class="w-4 h-4 border-2 border-violet-500/30 border-t-violet-400 rounded-full animate-spin"></div>
+            <span class="text-gray-500 text-xs">Scanning files...</span>
+          </div>
         <% else %>
-          <.tree_entries entries={@tree} expanded_dirs={@expanded_dirs} depth={0} myself={@myself} />
+          <%= if @tree == [] do %>
+            <p class="px-3 py-4 text-gray-500 text-center text-xs">No files indexed</p>
+          <% else %>
+            <.tree_entries entries={@tree} expanded_dirs={@expanded_dirs} depth={0} myself={@myself} />
+          <% end %>
         <% end %>
       </div>
 
@@ -175,6 +185,28 @@ defmodule LoomkinWeb.FileTreeComponent do
     </div>
     """
   end
+
+  # --- Async scanning ---
+
+  defp start_async_scan(socket, project_path) do
+    component_id = socket.assigns.id
+    parent_pid = self()
+
+    {:ok, pid} =
+      Task.start(fn ->
+        result = build_tree(project_path)
+        send_update(parent_pid, __MODULE__, id: component_id, __async_result__: result)
+      end)
+
+    assign(socket, loading: true, scan_task: pid)
+  end
+
+  defp cancel_scan(%{assigns: %{scan_task: pid}} = socket) when is_pid(pid) do
+    Process.exit(pid, :kill)
+    assign(socket, scan_task: nil)
+  end
+
+  defp cancel_scan(socket), do: socket
 
   # --- Tree building ---
 
