@@ -198,7 +198,7 @@ defmodule Loomkin.Teams.OrchestrationTest do
       assert_receive {:sub_team_completed, ^sub_team_id}
 
       # Sub-team ETS table is cleaned up
-      assert :error = Loomkin.Teams.TableRegistry.get_table(sub_team_id)
+      assert {:error, :not_found} = Loomkin.Teams.TableRegistry.get_table(sub_team_id)
 
       # Sub-team removed from parent's list
       assert sub_team_id not in TeamManager.list_sub_teams(backing_team_id)

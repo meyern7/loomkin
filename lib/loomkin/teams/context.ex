@@ -49,6 +49,8 @@ defmodule Loomkin.Teams.Context do
     discovery = Map.put(discovery, :timestamp, System.monotonic_time(:millisecond))
     :ets.insert(team_table(team_id), {{:discovery, seq}, discovery})
     :ok
+  rescue
+    ArgumentError -> {:error, :no_team_table}
   end
 
   def list_discoveries(team_id) do
@@ -111,6 +113,8 @@ defmodule Loomkin.Teams.Context do
           other -> {:conflict, other.agent, other.region}
         end
     end
+  rescue
+    ArgumentError -> {:error, :no_team_table}
   end
 
   def release_region(team_id, agent_name, path) do
@@ -149,6 +153,8 @@ defmodule Loomkin.Teams.Context do
   def cache_task(team_id, task_id, %{title: _, status: _, owner: _} = task) do
     :ets.insert(team_table(team_id), {{:task, task_id}, task})
     :ok
+  rescue
+    ArgumentError -> :ok
   end
 
   def get_cached_task(team_id, task_id) do

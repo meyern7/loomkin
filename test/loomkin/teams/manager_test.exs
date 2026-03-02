@@ -118,7 +118,7 @@ defmodule Loomkin.Teams.ManagerTest do
 
       assert :ok = Manager.dissolve_team(team_id)
       assert :ets.info(ref) == :undefined
-      assert :error = Loomkin.Teams.TableRegistry.get_table(team_id)
+      assert {:error, :not_found} = Loomkin.Teams.TableRegistry.get_table(team_id)
     end
 
     test "is idempotent — calling twice does not crash" do

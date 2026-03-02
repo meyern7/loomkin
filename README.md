@@ -65,13 +65,18 @@ cd loomkin
 # Install deps and set up the database
 mix setup
 
-# Build the CLI escript
-mix escript.build
+# Build a release (includes native extensions + priv assets)
+MIX_ENV=prod mix release loomkin
+# → _build/prod/rel/loomkin/bin/loom start
 
 # Start the web UI (optional)
 mix phx.server
 # → http://localhost:4200
 ```
+
+> **Note:** `mix escript.build` is available for development but the escript cannot
+> bundle NIFs (exqlite) or priv directories (tzdata). Use `mix release` for a
+> runnable binary. See [docs/building-binaries.md](docs/building-binaries.md).
 
 ### Configure
 

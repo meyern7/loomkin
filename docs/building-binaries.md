@@ -1,5 +1,12 @@
 # Building Standalone Binaries
 
+> **Do not use `mix escript.build` for distribution.** Escript archives cannot
+> bundle native extensions (exqlite NIF) or priv directories (tzdata). The
+> escript entry point will detect this and exit with an error. Use `mix release`
+> or Burrito instead. The escript config in `mix.exs` exists only for quick
+> development iteration. See [#39](https://github.com/bleuropa/loomkin/issues/39)
+> and [#43](https://github.com/bleuropa/loomkin/issues/43).
+
 Loomkin can be packaged as a single self-contained binary using [Burrito](https://github.com/burrito-elixir/burrito). The binary bundles the BEAM runtime, so users don't need Elixir or Erlang installed.
 
 ## Quick Build (current platform)

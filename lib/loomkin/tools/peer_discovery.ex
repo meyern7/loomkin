@@ -23,10 +23,16 @@ defmodule Loomkin.Tools.PeerDiscovery do
     type_str = param(params, :type) || "discovery"
     from = param!(context, :agent_name)
 
-    discovery = %{from: from, type: type_str, content: content}
-    Context.add_discovery(team_id, discovery)
-    Comms.broadcast_context(team_id, discovery)
+    case Loomkin.Teams.TableRegistry.get_table(team_id) do
+      {:ok, _ref} ->
+        discovery = %{from: from, type: type_str, content: content}
+        Context.add_discovery(team_id, discovery)
+        Comms.broadcast_context(team_id, discovery)
 
-    {:ok, %{result: "Discovery broadcast to team: #{String.slice(content, 0, 80)}"}}
+        {:ok, %{result: "Discovery broadcast to team: #{String.slice(content, 0, 80)}"}}
+
+      {:error, :not_found} ->
+        {:error, "No active team session for team '#{team_id}'. PeerDiscovery requires a running team."}
+    end
   end
 end

@@ -43,7 +43,7 @@ defmodule Loomkin.Tools.SubAgent do
       raise "Scope '#{scope}' is outside the project directory"
     end
 
-    model = weak_model()
+    model = param(context, :model, nil) || weak_model()
     tool_defs = build_tool_definitions()
 
     system_content =

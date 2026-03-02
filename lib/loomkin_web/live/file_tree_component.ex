@@ -19,11 +19,12 @@ defmodule LoomkinWeb.FileTreeComponent do
 
   @impl true
   def update(assigns, socket) do
+    previous_path = socket.assigns[:project_path]
     socket = assign(socket, assigns)
 
     project_path = assigns[:project_path]
 
-    if project_path && project_path != "" do
+    if project_path && project_path != "" && project_path != previous_path do
       {tree, file_count, total_size} = build_tree(project_path)
 
       filtered_tree =

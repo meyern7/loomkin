@@ -12,16 +12,19 @@ defmodule Loomkin.Teams.TableRegistry do
     GenServer.call(__MODULE__, {:create, team_id})
   end
 
-  @doc "Get the ETS table reference for a team. Returns {:ok, ref} or :error."
+  @doc "Get the ETS table reference for a team. Returns {:ok, ref} or {:error, :not_found}."
   def get_table(team_id) do
-    GenServer.call(__MODULE__, {:get, team_id})
+    case GenServer.call(__MODULE__, {:get, team_id}) do
+      {:ok, ref} -> {:ok, ref}
+      :error -> {:error, :not_found}
+    end
   end
 
   @doc "Get the ETS table reference, raising if not found."
   def get_table!(team_id) do
     case get_table(team_id) do
       {:ok, ref} -> ref
-      :error -> raise ArgumentError, "No ETS table for team #{team_id}"
+      {:error, :not_found} -> raise ArgumentError, "No ETS table for team #{team_id}"
     end
   end
 

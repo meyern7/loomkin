@@ -33,6 +33,9 @@ defmodule Loomkin.Tools.PeerClaimRegion do
 
       {:conflict, other_agent, other_region} ->
         {:ok, %{result: "Conflict: #{other_agent} holds #{path} #{inspect(other_region)}. Choose a different region."}}
+
+      {:error, :no_team_table} ->
+        {:error, "No active team session for team '#{team_id}'. PeerClaimRegion requires a running team."}
     end
   end
 end

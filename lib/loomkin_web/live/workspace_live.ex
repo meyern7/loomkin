@@ -440,6 +440,22 @@ defmodule LoomkinWeb.WorkspaceLive do
     {:noreply, assign(socket, selected_file: path, file_content: file_content)}
   end
 
+  def handle_info({:select_prompt, prompt}, socket) do
+    session_id = socket.assigns.session_id
+    task = Task.async(fn -> Session.send_message(session_id, prompt) end)
+    user_msg = %{role: :user, content: prompt}
+
+    {:noreply,
+     socket
+     |> assign(
+       input_text: "",
+       async_task: task,
+       status: :thinking,
+       messages: socket.assigns.messages ++ [user_msg]
+     )
+     |> push_event("clear-input", %{})}
+  end
+
   # Messages from child components
   def handle_info({:change_model, model}, socket) do
     Session.update_model(socket.assigns.session_id, model)
@@ -500,6 +516,11 @@ defmodule LoomkinWeb.WorkspaceLive do
   def handle_info({:usage, _agent_name, _payload}, socket) do
     forward_to_cost(socket)
     {:noreply, socket}
+  end
+
+  # Agent error events (max iterations exceeded, tool failures, etc.)
+  def handle_info({:agent_error, _agent_name, _payload} = event, socket) do
+    {:noreply, forward_to_activity(socket, event)}
   end
 
   # Agent streaming events — show thoughts live in activity feed
@@ -1326,6 +1347,22 @@ defmodule LoomkinWeb.WorkspaceLive do
 
   defp activity_event_from({:agent_status, _agent, _}), do: nil
 
+  defp activity_event_from({:agent_error, agent, payload}) do
+    content =
+      cond do
+        is_map(payload) && payload[:max] ->
+          "Exceeded max iterations (#{payload[:max]})"
+
+        is_map(payload) && payload[:reason] ->
+          "Error: #{String.slice(to_string(payload[:reason]), 0, 300)}"
+
+        true ->
+          "Encountered an error"
+      end
+
+    %{id: Ecto.UUID.generate(), type: :error, agent: agent, content: content, timestamp: DateTime.utc_now(), expanded: false, metadata: %{}}
+  end
+
   # --- Streaming: skip start/end noise ---
 
   defp activity_event_from({:agent_stream_start, _agent, _payload}), do: nil
@@ -1542,7 +1579,11 @@ defmodule LoomkinWeb.WorkspaceLive do
     tid = socket.assigns[:active_team_id] || socket.assigns[:team_id]
 
     if tid && team_tab_visible?(socket) && socket.assigns[:team_sub_tab] == :cost do
-      send_update(LoomkinWeb.TeamCostComponent, id: "team-cost", team_id: tid)
+      try do
+        send_update(LoomkinWeb.TeamCostComponent, id: "team-cost", team_id: tid)
+      rescue
+        ArgumentError -> :ok
+      end
     end
   end
 

@@ -7,6 +7,11 @@ defmodule LoomkinWeb.ChatComponent do
      |> assign(assigns)}
   end
 
+  def handle_event("select_prompt", %{"prompt" => prompt}, socket) do
+    send(self(), {:select_prompt, prompt})
+    {:noreply, socket}
+  end
+
   def render(assigns) do
     ~H"""
     <div class="flex-1 overflow-auto" id="chat-messages" phx-hook="ScrollToBottom">
@@ -22,15 +27,15 @@ defmodule LoomkinWeb.ChatComponent do
               <p class="text-sm text-gray-500 mt-1">Send a message to start your coding session.</p>
             </div>
             <div class="flex flex-wrap gap-2 justify-center pt-2">
-              <span class="px-3 py-1.5 text-xs bg-gray-800/80 text-gray-400 rounded-full border border-gray-700/50 hover:border-violet-500/30 hover:text-gray-300 transition-all duration-200 cursor-default">
+              <button phx-click="select_prompt" phx-value-prompt="Explore this codebase" phx-target={@myself} class="px-3 py-1.5 text-xs bg-gray-800/80 text-gray-400 rounded-full border border-gray-700/50 hover:border-violet-500/30 hover:text-gray-300 transition-all duration-200 cursor-pointer">
                 Explore this codebase
-              </span>
-              <span class="px-3 py-1.5 text-xs bg-gray-800/80 text-gray-400 rounded-full border border-gray-700/50 hover:border-violet-500/30 hover:text-gray-300 transition-all duration-200 cursor-default">
+              </button>
+              <button phx-click="select_prompt" phx-value-prompt="Fix a bug" phx-target={@myself} class="px-3 py-1.5 text-xs bg-gray-800/80 text-gray-400 rounded-full border border-gray-700/50 hover:border-violet-500/30 hover:text-gray-300 transition-all duration-200 cursor-pointer">
                 Fix a bug
-              </span>
-              <span class="px-3 py-1.5 text-xs bg-gray-800/80 text-gray-400 rounded-full border border-gray-700/50 hover:border-violet-500/30 hover:text-gray-300 transition-all duration-200 cursor-default">
+              </button>
+              <button phx-click="select_prompt" phx-value-prompt="Add a feature" phx-target={@myself} class="px-3 py-1.5 text-xs bg-gray-800/80 text-gray-400 rounded-full border border-gray-700/50 hover:border-violet-500/30 hover:text-gray-300 transition-all duration-200 cursor-pointer">
                 Add a feature
-              </span>
+              </button>
             </div>
           </div>
         </div>

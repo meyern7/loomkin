@@ -49,14 +49,19 @@ Hooks.ScrollToBottom = {
 // TabTransition: adds fade-in animation class when tab content appears
 Hooks.TabTransition = {
   mounted() {
+    this.currentTab = this.el.dataset.tab || this.el.id
     this.el.classList.add("tab-content-enter")
   },
   updated() {
-    // Re-trigger animation on content change
-    this.el.classList.remove("tab-content-enter")
-    // Force reflow to restart animation
-    void this.el.offsetWidth
-    this.el.classList.add("tab-content-enter")
+    const newTab = this.el.dataset.tab || this.el.id
+    if (this.currentTab !== newTab) {
+      this.currentTab = newTab
+      // Re-trigger animation only on actual tab change
+      this.el.classList.remove("tab-content-enter")
+      // Force reflow to restart animation
+      void this.el.offsetWidth
+      this.el.classList.add("tab-content-enter")
+    }
   }
 }
 

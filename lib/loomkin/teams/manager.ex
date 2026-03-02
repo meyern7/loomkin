@@ -253,7 +253,7 @@ defmodule Loomkin.Teams.Manager do
           _ -> :error
         end
 
-      :error ->
+      {:error, :not_found} ->
         :error
     end
   end
@@ -266,7 +266,7 @@ defmodule Loomkin.Teams.Manager do
           [] -> []
         end
 
-      :error ->
+      {:error, :not_found} ->
         []
     end
   end
@@ -279,7 +279,7 @@ defmodule Loomkin.Teams.Manager do
             updated = get_sub_team_ids(parent_id) -- [team_id]
             :ets.insert(table, {:sub_teams, updated})
 
-          :error ->
+          {:error, :not_found} ->
             :ok
         end
 

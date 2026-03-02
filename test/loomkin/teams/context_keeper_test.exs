@@ -6,11 +6,13 @@ defmodule Loomkin.Teams.ContextKeeperTest do
   setup do
     # Ensure supervisor tree is available
     on_exit(fn ->
-      # Clean up any keepers we spawned
-      DynamicSupervisor.which_children(Loomkin.Teams.AgentSupervisor)
-      |> Enum.each(fn {_, pid, _, _} ->
-        DynamicSupervisor.terminate_child(Loomkin.Teams.AgentSupervisor, pid)
-      end)
+      # Clean up any keepers we spawned (supervisor may already be down during teardown)
+      if Process.whereis(Loomkin.Teams.AgentSupervisor) do
+        DynamicSupervisor.which_children(Loomkin.Teams.AgentSupervisor)
+        |> Enum.each(fn {_, pid, _, _} ->
+          DynamicSupervisor.terminate_child(Loomkin.Teams.AgentSupervisor, pid)
+        end)
+      end
     end)
 
     :ok

@@ -74,27 +74,14 @@ defmodule Loomkin.Tools.FileRead do
       {:error, :eisdir} ->
         rel_path = Path.relative_to(full_path, project_path)
 
-        {:ok,
-         %{
-           result:
-             "Path is a directory, not a file: #{full_path}\n" <>
-               "Use directory_list with path: #{rel_path}"
-         }}
+        {:error,
+         "Path is a directory, not a file: #{full_path}\n" <>
+           "Use directory_list with path: #{rel_path}"}
 
       {:error, reason} ->
         {:error, "Failed to read #{full_path}: #{reason}"}
     end
   rescue
-    e in ArgumentError ->
-      if String.contains?(e.message, "outside the project directory") do
-        {:ok,
-         %{
-           result:
-             "#{e.message}\n" <>
-               "Use a path relative to the project root or move the file into this project."
-         }}
-      else
-        {:error, e.message}
-      end
+    e in ArgumentError -> {:error, e.message}
   end
 end

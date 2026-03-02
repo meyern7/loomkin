@@ -114,7 +114,7 @@ defmodule Loomkin.Teams.NestedTeamsTest do
       Manager.dissolve_team(parent_id)
 
       # Sub-team's ETS table should be deleted
-      assert :error = TableRegistry.get_table(sub_id)
+      assert {:error, :not_found} = TableRegistry.get_table(sub_id)
     end
 
     test "cascades dissolution recursively through multiple levels" do
@@ -127,9 +127,9 @@ defmodule Loomkin.Teams.NestedTeamsTest do
 
       Manager.dissolve_team(root)
 
-      assert :error = TableRegistry.get_table(leaf)
-      assert :error = TableRegistry.get_table(mid)
-      assert :error = TableRegistry.get_table(root)
+      assert {:error, :not_found} = TableRegistry.get_table(leaf)
+      assert {:error, :not_found} = TableRegistry.get_table(mid)
+      assert {:error, :not_found} = TableRegistry.get_table(root)
     end
 
     test "notifies parent spawning agent on sub-team dissolution", %{parent_id: parent_id} do

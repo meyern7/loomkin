@@ -4,6 +4,22 @@ defmodule LoomkinCli.Main do
   """
 
   def main(args) do
+    if running_as_escript?() do
+      IO.puts("""
+      Error: Loomkin cannot run as an escript.
+
+      Escript archives cannot bundle native extensions (exqlite) or priv directories (tzdata).
+
+      Build a proper release instead:
+        MIX_ENV=prod mix release loomkin
+        _build/prod/rel/loomkin/bin/loom start
+
+      See docs/building-binaries.md for details.
+      """)
+
+      System.halt(1)
+    end
+
     {opts, rest, _invalid} =
       OptionParser.parse(args,
         strict: [
@@ -73,6 +89,18 @@ defmodule LoomkinCli.Main do
         # Oneshot mode — join remaining args as the prompt
         prompt = Enum.join(prompt_parts, " ")
         LoomkinCli.Interactive.oneshot(prompt, cli_opts)
+    end
+  end
+
+  defp running_as_escript? do
+    # When running as an escript, the module's beam file is inside a .escript archive.
+    # :code.which/1 returns a path like '/path/to/loomkin/loomkin.escript/loomkin/ebin/...'
+    case :code.which(__MODULE__) do
+      path when is_list(path) ->
+        String.contains?(List.to_string(path), ".escript")
+
+      _ ->
+        false
     end
   end
 

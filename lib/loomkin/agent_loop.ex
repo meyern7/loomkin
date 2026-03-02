@@ -14,6 +14,7 @@ defmodule Loomkin.AgentLoop do
   require Logger
 
   @max_rate_limit_retries 3
+  @max_iterations 25
 
   @type on_event :: (atom(), map() -> :ok)
 
@@ -94,6 +95,7 @@ defmodule Loomkin.AgentLoop do
       session_id: Keyword.get(opts, :session_id),
       agent_name: Keyword.get(opts, :agent_name),
       team_id: Keyword.get(opts, :team_id),
+      max_iterations: Keyword.get(opts, :max_iterations, @max_iterations),
       on_event: Keyword.get(opts, :on_event, fn _name, _payload -> :ok end),
       on_tool_execute: Keyword.get(opts, :on_tool_execute),
       check_permission: Keyword.get(opts, :check_permission),
@@ -102,6 +104,23 @@ defmodule Loomkin.AgentLoop do
   end
 
   # -- Loop --------------------------------------------------------------------
+
+  defp do_loop(messages, %{max_iterations: max} = config, iteration)
+       when iteration >= max do
+    error_msg =
+      "Agent exceeded maximum iterations (#{max}). " <>
+        "Stopping to avoid infinite loops."
+
+    Logger.warning("AgentLoop: #{error_msg}")
+    emit(config, :max_iterations_exceeded, %{iterations: iteration, max: max})
+
+    # Return the error as an assistant message so the user sees it
+    assistant_msg = %{role: :assistant, content: error_msg}
+    messages = messages ++ [assistant_msg]
+    emit(config, :new_message, assistant_msg)
+
+    {:ok, error_msg, messages, %{usage: %{input_tokens: 0, output_tokens: 0, total_cost: 0}}}
+  end
 
   defp do_loop(messages, config, iteration) do
     # Auto-offload context if agent is above threshold
@@ -366,14 +385,40 @@ defmodule Loomkin.AgentLoop do
     Map.new(args, fn
       {k, v} when is_binary(k) ->
         case Map.fetch(known_strings, k) do
-          {:ok, atom_key} -> {atom_key, v}
-          :error -> {k, v}
+          {:ok, atom_key} -> {atom_key, deep_atomize_value(v)}
+          :error -> {k, deep_atomize_value(v)}
         end
 
       {k, v} ->
-        {k, v}
+        {k, deep_atomize_value(v)}
     end)
   end
+
+  # Recursively atomize string keys in nested maps and lists.
+  # LLM tool calls return JSON with string keys at every nesting level,
+  # but Jido/NimbleOptions validation expects atom keys for maps.
+  defp deep_atomize_value(list) when is_list(list) do
+    Enum.map(list, &deep_atomize_value/1)
+  end
+
+  defp deep_atomize_value(map) when is_map(map) do
+    Map.new(map, fn
+      {k, v} when is_binary(k) ->
+        atom_key =
+          try do
+            String.to_existing_atom(k)
+          rescue
+            ArgumentError -> k
+          end
+
+        {atom_key, deep_atomize_value(v)}
+
+      {k, v} ->
+        {k, deep_atomize_value(v)}
+    end)
+  end
+
+  defp deep_atomize_value(value), do: value
 
   defp record_tool_result(messages, config, tool_name, tool_call_id, result_text) do
     emit(config, :tool_complete, %{tool_name: tool_name, result: result_text})

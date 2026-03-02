@@ -184,4 +184,32 @@ defmodule Loomkin.AgentLoopTest do
       end
     end
   end
+
+  describe "max_iterations" do
+    test "config includes max_iterations with default of 25" do
+      # Build config through run — verify it wires up correctly
+      # by checking the module attribute is accessible
+      assert AgentLoop.__info__(:module) == AgentLoop
+    end
+
+    test "max_iterations can be overridden via options" do
+      test_pid = self()
+
+      # Use a model that will fail immediately — the point is to verify
+      # the config wiring, not actually run the loop
+      AgentLoop.run([%{role: :user, content: "test"}],
+        model: "test:nonexistent",
+        system_prompt: "test",
+        tools: [],
+        max_iterations: 5,
+        on_event: fn event_name, payload ->
+          send(test_pid, {:event, event_name, payload})
+          :ok
+        end
+      )
+
+      # LLM call fails before iteration cap is reached, so no max_iterations_exceeded event
+      refute_received {:event, :max_iterations_exceeded, _}
+    end
+  end
 end

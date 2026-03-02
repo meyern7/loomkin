@@ -222,7 +222,9 @@ defmodule Loomkin.Teams.Agent do
   @impl true
   def handle_cast({:assign_task, task}, state) do
     Logger.info("[Agent:#{state.name}] Assigned task: #{inspect(task[:id] || task)}")
-    model = ModelRouter.select(state.role, task)
+    # Only override model if the task has an explicit model_hint;
+    # otherwise preserve the agent's current model (set at spawn from user's selection)
+    model = if task[:model_hint], do: ModelRouter.select(state.role, task), else: state.model
     state = %{state | task: task, model: model}
 
     messages = maybe_prefetch_context(state, task)
@@ -313,8 +315,11 @@ defmodule Loomkin.Teams.Agent do
 
       case Loomkin.Teams.Tasks.get_task(task_id) do
         {:ok, task} ->
-          model = ModelRouter.select(state.role, %{id: task.id, description: task.description})
-          state = %{state | task: %{id: task.id, description: task.description, title: task.title}, model: model}
+          # Only override model if the task has an explicit model_hint;
+          # otherwise preserve the agent's current model (set at spawn from user's selection)
+          task_map = %{id: task.id, description: task.description, title: task.title, model_hint: task.model_hint}
+          model = if task.model_hint, do: ModelRouter.select(state.role, task_map), else: state.model
+          state = %{state | task: task_map, model: model}
           messages = maybe_prefetch_context(state, state.task)
           state = %{state | messages: messages}
 
@@ -977,6 +982,9 @@ defmodule Loomkin.Teams.Agent do
 
       :context_offloaded ->
         Phoenix.PubSub.broadcast(Loomkin.PubSub, topic, {:context_offloaded, agent_name, payload})
+
+      :max_iterations_exceeded ->
+        Phoenix.PubSub.broadcast(Loomkin.PubSub, topic, {:agent_error, agent_name, payload})
 
       _ ->
         :ok
