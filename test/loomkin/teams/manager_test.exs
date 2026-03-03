@@ -152,6 +152,97 @@ defmodule Loomkin.Teams.ManagerTest do
     end
   end
 
+  describe "list_agents/1 excludes keepers" do
+    test "returns empty list when team has only keepers" do
+      {:ok, team_id} = Manager.create_team(name: "only-keepers")
+
+      # Register a keeper entry (same shape as ContextKeeper.start_link registers)
+      {:ok, _} = Registry.register(
+        Loomkin.Teams.AgentRegistry,
+        {team_id, "keeper:abc-123"},
+        %{type: :keeper, topic: "test topic", tokens: 100, source_agent: "coder"}
+      )
+
+      assert Manager.list_agents(team_id) == []
+    end
+
+    test "returns only agents when team has both agents and keepers" do
+      {:ok, team_id} = Manager.create_team(name: "mixed-team")
+
+      # Register a real agent
+      {:ok, _} = Registry.register(
+        Loomkin.Teams.AgentRegistry,
+        {team_id, "coder-1"},
+        %{role: :coder, status: :idle}
+      )
+
+      # We need a separate process for the keeper registration since Registry
+      # allows only one key per process
+      keeper_task = Task.async(fn ->
+        {:ok, _} = Registry.register(
+          Loomkin.Teams.AgentRegistry,
+          {team_id, "keeper:def-456"},
+          %{type: :keeper, topic: "context", tokens: 50, source_agent: "coder-1"}
+        )
+        Process.sleep(:infinity)
+      end)
+
+      # Give time for registration
+      Process.sleep(10)
+
+      agents = Manager.list_agents(team_id)
+      assert length(agents) == 1
+      assert [%{name: "coder-1", role: :coder, status: :idle}] = agents
+
+      Task.shutdown(keeper_task, :brutal_kill)
+    end
+
+    test "returns all agents when no keepers are present" do
+      {:ok, team_id} = Manager.create_team(name: "agents-only")
+
+      {:ok, _} = Registry.register(
+        Loomkin.Teams.AgentRegistry,
+        {team_id, "researcher-1"},
+        %{role: :researcher, status: :working}
+      )
+
+      agents = Manager.list_agents(team_id)
+      assert length(agents) == 1
+      assert [%{name: "researcher-1", role: :researcher, status: :working}] = agents
+    end
+
+    test "handles multiple keepers without leaking any into agent list" do
+      {:ok, team_id} = Manager.create_team(name: "multi-keeper")
+
+      # Register an agent from the test process
+      {:ok, _} = Registry.register(
+        Loomkin.Teams.AgentRegistry,
+        {team_id, "lead-1"},
+        %{role: :lead, status: :idle}
+      )
+
+      # Register multiple keepers from separate processes
+      keeper_tasks = Enum.map(1..3, fn i ->
+        Task.async(fn ->
+          {:ok, _} = Registry.register(
+            Loomkin.Teams.AgentRegistry,
+            {team_id, "keeper:keeper-#{i}"},
+            %{type: :keeper, topic: "topic-#{i}", tokens: i * 100, source_agent: "lead-1"}
+          )
+          Process.sleep(:infinity)
+        end)
+      end)
+
+      Process.sleep(10)
+
+      agents = Manager.list_agents(team_id)
+      assert length(agents) == 1
+      assert [%{name: "lead-1", role: :lead}] = agents
+
+      Enum.each(keeper_tasks, &Task.shutdown(&1, :brutal_kill))
+    end
+  end
+
   describe "stop_agent/2" do
     test "returns :ok for nonexistent agent" do
       {:ok, team_id} = Manager.create_team(name: "stop-test")

@@ -224,13 +224,17 @@ defmodule Loomkin.Teams.Manager do
     end
   end
 
-  @doc "List all agents in a team."
+  @doc "List all agents in a team (excludes keepers and other non-agent entries)."
   def list_agents(team_id) do
     Registry.select(Loomkin.Teams.AgentRegistry, [
       {{{team_id, :"$1"}, :"$2", :"$3"}, [], [%{name: :"$1", pid: :"$2", meta: :"$3"}]}
     ])
+    |> Enum.filter(fn %{meta: meta} ->
+      is_map(meta) and meta[:type] != :keeper and
+        (Map.has_key?(meta, :role) or Map.has_key?(meta, "role"))
+    end)
     |> Enum.map(fn %{name: name, pid: pid, meta: meta} ->
-      %{name: name, pid: pid, role: meta[:role] || meta.role, status: meta[:status] || meta.status}
+      %{name: name, pid: pid, role: meta[:role] || meta["role"], status: meta[:status] || meta["status"] || :idle}
     end)
   end
 

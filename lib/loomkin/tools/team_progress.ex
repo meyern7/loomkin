@@ -18,7 +18,7 @@ defmodule Loomkin.Tools.TeamProgress do
   def run(params, _context) do
     team_id = param!(params, :team_id)
 
-    agents = Manager.list_agents(team_id)
+    agents = safe_list_agents(team_id)
     tasks = Tasks.list_all(team_id)
     claims = Context.list_all_claims(team_id)
     budget = RateLimiter.get_budget(team_id)
@@ -28,7 +28,7 @@ defmodule Loomkin.Tools.TeamProgress do
         "  (none)"
       else
         Enum.map_join(agents, "\n", fn a ->
-          "  - #{a.name} (#{a.role}): #{a.status}"
+          "  - #{Map.get(a, :name, "?")} (#{Map.get(a, :role, "?")}): #{Map.get(a, :status, "?")}"
         end)
       end
 
@@ -71,5 +71,11 @@ defmodule Loomkin.Tools.TeamProgress do
     """
 
     {:ok, %{result: String.trim(summary)}}
+  end
+
+  defp safe_list_agents(team_id) do
+    Manager.list_agents(team_id)
+  rescue
+    _ -> []
   end
 end
