@@ -14,6 +14,9 @@ defmodule Loomkin.Application do
     # Create ETS table for Plug session store (must exist before endpoint starts)
     :ets.new(:loomkin_sessions, [:named_table, :public, :set])
 
+    # Register custom OAuth provider with ReqLLM
+    register_oauth_providers()
+
     children =
       [
         # Storage
@@ -27,6 +30,12 @@ defmodule Loomkin.Application do
 
         # Telemetry metrics aggregation
         Loomkin.Telemetry.Metrics,
+
+        # OAuth token storage (encrypted persistence + auto-refresh)
+        Loomkin.Auth.TokenStore,
+
+        # OAuth flow management (in-flight state, PKCE)
+        Loomkin.Auth.OAuthServer,
 
         # Session registry for pid lookup by session_id
         {Registry, keys: :unique, name: Loomkin.SessionRegistry},
@@ -80,6 +89,23 @@ defmodule Loomkin.Application do
     case :code.priv_dir(:loomkin) do
       {:error, _} -> false
       path -> path |> to_string() |> String.contains?("releases")
+    end
+  end
+
+  defp register_oauth_providers do
+    for module <- Loomkin.Auth.ProviderRegistry.reqllm_modules() do
+      if Code.ensure_loaded?(module) and function_exported?(module, :register!, 0) do
+        try do
+          module.register!()
+        rescue
+          e ->
+            require Logger
+
+            Logger.warning(
+              "Failed to register OAuth provider #{inspect(module)}: #{Exception.message(e)}"
+            )
+        end
+      end
     end
   end
 end

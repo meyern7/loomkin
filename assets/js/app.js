@@ -97,7 +97,8 @@ Hooks.TabTransition = {
   }
 }
 
-// ModelSelector: handles dropdown open/close, click-outside, escape, keyboard nav
+// ModelSelector: handles dropdown open/close, click-outside, escape, keyboard nav,
+// and paste-back OAuth flow initiation
 Hooks.ModelSelector = {
   mounted() {
     // Close on Escape
@@ -133,12 +134,31 @@ Hooks.ModelSelector = {
       }
     }
     document.addEventListener("keydown", this._onKeydown)
+
+    // Handle paste-back OAuth flow initiation from server
+    this.handleEvent("start_paste_back_flow", ({ authorize_url, provider }) => {
+      // Open the provider's auth page in a new window
+      window.open(authorize_url, "_blank", "noopener,noreferrer")
+    })
+
+    // Handle paste-back submission result
+    this.handleEvent("paste_submit_result", ({ status, message, error }) => {
+      if (status === "ok") {
+        // Success — the LiveView will handle updating the UI via PubSub
+      }
+      // Errors are handled server-side by updating the component assigns
+    })
   },
   updated() {
     // Focus search input when dropdown opens
     const searchInput = this.el.querySelector("#model-search-input")
     if (searchInput) {
       requestAnimationFrame(() => searchInput.focus())
+    }
+    // Focus paste input when paste modal is shown
+    const pasteInput = this.el.querySelector("#paste-code-input")
+    if (pasteInput) {
+      requestAnimationFrame(() => pasteInput.focus())
     }
   },
   destroyed() {

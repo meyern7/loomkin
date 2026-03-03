@@ -95,6 +95,7 @@ defmodule LoomkinWeb.WorkspaceLive do
     if connected?(socket) do
       Session.subscribe(session_id)
       Phoenix.PubSub.subscribe(Loomkin.PubSub, "telemetry:updates")
+      Phoenix.PubSub.subscribe(Loomkin.PubSub, "auth:status")
       ensure_index_started(project_path)
 
       team_id = socket.assigns[:team_id]
@@ -243,9 +244,11 @@ defmodule LoomkinWeb.WorkspaceLive do
   def handle_event("reply_to_agent", %{"agent" => agent_name}, socket) do
     # Find the agent's team_id from the roster data (use active_team_id for sub-team support)
     agents = roster_agents(socket.assigns.active_team_id)
-    team_id = Enum.find_value(agents, socket.assigns.active_team_id, fn a ->
-      if a.name == agent_name, do: a.team_id
-    end)
+
+    team_id =
+      Enum.find_value(agents, socket.assigns.active_team_id, fn a ->
+        if a.name == agent_name, do: a.team_id
+      end)
 
     {:noreply, assign(socket, reply_target: %{agent: agent_name, team_id: team_id})}
   end
@@ -303,7 +306,9 @@ defmodule LoomkinWeb.WorkspaceLive do
 
   def handle_event("switch_team", %{"team-id" => team_id}, socket) do
     bindings = load_channel_bindings(team_id)
-    {:noreply, assign(socket, active_team_id: team_id, channel_bindings: bindings, reply_target: nil)}
+
+    {:noreply,
+     assign(socket, active_team_id: team_id, channel_bindings: bindings, reply_target: nil)}
   end
 
   def handle_event("edit_explorer_path", _params, socket) do
@@ -380,7 +385,6 @@ defmodule LoomkinWeb.WorkspaceLive do
     {:noreply, push_event(socket, "focus-input", %{})}
   end
 
-
   def handle_event("keyboard_shortcut", %{"key" => "command_palette"}, socket) do
     if socket.assigns.command_palette_open do
       {:noreply,
@@ -426,8 +430,7 @@ defmodule LoomkinWeb.WorkspaceLive do
   def handle_event("palette_search", %{"value" => query}, socket) do
     results = build_palette_results(socket, query)
 
-    {:noreply,
-     assign(socket, command_palette_query: query, command_palette_results: results)}
+    {:noreply, assign(socket, command_palette_query: query, command_palette_results: results)}
   end
 
   def handle_event("palette_select", %{"type" => "agent", "value" => agent_name}, socket) do
@@ -555,9 +558,11 @@ defmodule LoomkinWeb.WorkspaceLive do
   def handle_info({:reply_to_agent, agent_name}, socket) do
     # Forwarded from roster component — same logic as the event handler
     agents = roster_agents(socket.assigns.active_team_id)
-    team_id = Enum.find_value(agents, socket.assigns.active_team_id, fn a ->
-      if a.name == agent_name, do: a.team_id
-    end)
+
+    team_id =
+      Enum.find_value(agents, socket.assigns.active_team_id, fn a ->
+        if a.name == agent_name, do: a.team_id
+      end)
 
     {:noreply, assign(socket, reply_target: %{agent: agent_name, team_id: team_id})}
   end
@@ -676,7 +681,14 @@ defmodule LoomkinWeb.WorkspaceLive do
     # Auto-subscribe to backing team events when the team is created
     if connected?(socket), do: subscribe_to_team(team_id)
     bindings = load_channel_bindings(team_id)
-    {:noreply, assign(socket, team_id: team_id, active_team_id: team_id, mode: :mission_control, channel_bindings: bindings)}
+
+    {:noreply,
+     assign(socket,
+       team_id: team_id,
+       active_team_id: team_id,
+       mode: :mission_control,
+       channel_bindings: bindings
+     )}
   end
 
   def handle_info({:child_team_available, _session_id, child_team_id}, socket) do
@@ -1149,6 +1161,7 @@ defmodule LoomkinWeb.WorkspaceLive do
       case direction do
         :inbound ->
           {"[#{channel_label}] Incoming: #{String.slice(text, 0, 150)}", channel_label}
+
         :outbound ->
           {"[#{channel_label}] Sent by #{agent_name || "agent"}", agent_name || channel_label}
       end
@@ -1177,6 +1190,23 @@ defmodule LoomkinWeb.WorkspaceLive do
       end
 
     {:noreply, forward_to_activity(socket, {:collab_event, payload})}
+  end
+
+  # OAuth auth status changed — refresh model selector to reflect new provider availability
+  def handle_info({:auth_connected, _provider}, socket) do
+    {:noreply, send_update_to_model_selector(socket)}
+  end
+
+  def handle_info({:auth_disconnected, _provider}, socket) do
+    {:noreply, send_update_to_model_selector(socket)}
+  end
+
+  def handle_info({:auth_refreshed, _provider}, socket) do
+    {:noreply, socket}
+  end
+
+  def handle_info({:auth_refresh_failed, _provider, _reason}, socket) do
+    {:noreply, send_update_to_model_selector(socket)}
   end
 
   # Catch-all for unhandled PubSub messages (team events, etc.)
@@ -1246,10 +1276,14 @@ defmodule LoomkinWeb.WorkspaceLive do
           <div class="hidden items-center gap-2 text-sm text-gray-400 md:flex">
             <div class="flex items-center gap-1.5">
               <span class="relative flex h-2 w-2">
-                <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-50"></span>
+                <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-50">
+                </span>
                 <span class="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
               </span>
-              <span class="text-xs text-gray-300 font-mono truncate max-w-[12rem]" title={@project_path}>
+              <span
+                class="text-xs text-gray-300 font-mono truncate max-w-[12rem]"
+                title={@project_path}
+              >
                 {Path.basename(@project_path)}
               </span>
             </div>
@@ -1410,7 +1444,10 @@ defmodule LoomkinWeb.WorkspaceLive do
       />
 
       <%!-- Pending ask_user questions (also shown in solo mode) --%>
-      <div :if={@pending_questions != []} class="border-t border-violet-500/20 bg-gray-900/90 px-3 py-2">
+      <div
+        :if={@pending_questions != []}
+        class="border-t border-violet-500/20 bg-gray-900/90 px-3 py-2"
+      >
         <.live_component
           module={LoomkinWeb.AskUserComponent}
           id="ask-user-questions-solo"
@@ -1480,7 +1517,10 @@ defmodule LoomkinWeb.WorkspaceLive do
       />
 
       <%!-- Pending ask_user questions --%>
-      <div :if={@pending_questions != []} class="border-t border-violet-500/20 bg-gray-900/90 px-3 py-2">
+      <div
+        :if={@pending_questions != []}
+        class="border-t border-violet-500/20 bg-gray-900/90 px-3 py-2"
+      >
         <.live_component
           module={LoomkinWeb.AskUserComponent}
           id="ask-user-questions"
@@ -1523,16 +1563,29 @@ defmodule LoomkinWeb.WorkspaceLive do
   defp render_input_bar(assigns) do
     ~H"""
     <form phx-submit="send_message" class="border-t border-gray-800 bg-gray-900/80 p-3 sm:p-4">
-      <div :if={@reply_target} class="flex items-center gap-2 mb-2 px-2 py-1.5 bg-emerald-500/10 border border-emerald-500/20 rounded-lg">
+      <div
+        :if={@reply_target}
+        class="flex items-center gap-2 mb-2 px-2 py-1.5 bg-emerald-500/10 border border-emerald-500/20 rounded-lg"
+      >
         <span class="text-xs text-emerald-400 font-medium">Replying to {@reply_target.agent}</span>
-        <button type="button" phx-click="cancel_reply" class="ml-auto text-xs text-gray-500 hover:text-gray-300">&#10005;</button>
+        <button
+          type="button"
+          phx-click="cancel_reply"
+          class="ml-auto text-xs text-gray-500 hover:text-gray-300"
+        >
+          &#10005;
+        </button>
       </div>
       <div class="flex gap-3 items-end">
         <div class="flex-1 relative">
           <textarea
             name="text"
             rows="1"
-            placeholder={if @reply_target, do: "Reply to #{@reply_target.agent}...", else: "What should we work on?"}
+            placeholder={
+              if @reply_target,
+                do: "Reply to #{@reply_target.agent}...",
+                else: "What should we work on?"
+            }
             class="w-full bg-gray-800/60 border border-gray-700/50 rounded-xl px-4 py-3 text-sm text-gray-100 resize-none placeholder-gray-500 placeholder:italic focus:outline-none focus:ring-2 focus:ring-violet-500/30 focus:border-violet-500/50 transition-shadow"
             phx-hook="ShiftEnterSubmit"
             id="message-input"
@@ -1739,7 +1792,11 @@ defmodule LoomkinWeb.WorkspaceLive do
         >
           {team_sub_tab_label(sub)}
         </button>
-        <span :if={@collab_health} class="ml-auto flex items-center gap-1 text-xs" title={"Collaboration health: #{@collab_health}/100"}>
+        <span
+          :if={@collab_health}
+          class="ml-auto flex items-center gap-1 text-xs"
+          title={"Collaboration health: #{@collab_health}/100"}
+        >
           <span class={"inline-block w-2 h-2 rounded-full " <> collab_health_color(@collab_health)} />
           <span class="text-gray-500">{@collab_health}</span>
         </span>
@@ -1811,6 +1868,15 @@ defmodule LoomkinWeb.WorkspaceLive do
     Phoenix.PubSub.subscribe(Loomkin.PubSub, "team:#{team_id}:tasks")
     Phoenix.PubSub.subscribe(Loomkin.PubSub, "team:#{team_id}:context")
     Phoenix.PubSub.subscribe(Loomkin.PubSub, "team:#{team_id}:decisions")
+  end
+
+  defp send_update_to_model_selector(socket) do
+    send_update(LoomkinWeb.ModelSelectorComponent,
+      id: "model-selector",
+      model: socket.assigns.model
+    )
+
+    socket
   end
 
   defp forward_to_activity(socket, pubsub_event) do
@@ -2567,19 +2633,39 @@ defmodule LoomkinWeb.WorkspaceLive do
 
     tabs =
       Enum.map([:files, :diff, :terminal, :graph], fn tab ->
-        %{type: :tab, label: Atom.to_string(tab), detail: "Inspector Tab", value: Atom.to_string(tab)}
+        %{
+          type: :tab,
+          label: Atom.to_string(tab),
+          detail: "Inspector Tab",
+          value: Atom.to_string(tab)
+        }
       end)
 
     sub_tabs =
       Enum.map([:activity, :cost, :graph], fn tab ->
-        %{type: :sub_tab, label: Atom.to_string(tab), detail: "Team Sub-tab", value: Atom.to_string(tab)}
+        %{
+          type: :sub_tab,
+          label: Atom.to_string(tab),
+          detail: "Team Sub-tab",
+          value: Atom.to_string(tab)
+        }
       end)
 
     actions = [
-      %{type: :action, label: "Toggle Mode (Solo/Mission Control)", detail: "Action", value: "toggle_mode"},
+      %{
+        type: :action,
+        label: "Toggle Mode (Solo/Mission Control)",
+        detail: "Action",
+        value: "toggle_mode"
+      },
       %{type: :action, label: "Switch Project", detail: "Action", value: "switch_project"},
       %{type: :action, label: "Focus Input", detail: "Action", value: "focus_input"},
-      %{type: :action, label: "Refresh Channel Bindings", detail: "Channels", value: "refresh_channels"}
+      %{
+        type: :action,
+        label: "Refresh Channel Bindings",
+        detail: "Channels",
+        value: "refresh_channels"
+      }
     ]
 
     all = agents ++ tabs ++ sub_tabs ++ actions
@@ -2609,8 +2695,18 @@ defmodule LoomkinWeb.WorkspaceLive do
         id="command-palette"
       >
         <div class="flex items-center gap-2 px-4 py-3 border-b border-gray-800">
-          <svg class="w-5 h-5 text-gray-500 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          <svg
+            class="w-5 h-5 text-gray-500 flex-shrink-0"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            viewBox="0 0 24 24"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+            />
           </svg>
           <input
             type="text"
@@ -2627,7 +2723,10 @@ defmodule LoomkinWeb.WorkspaceLive do
         </div>
 
         <div class="max-h-72 overflow-y-auto py-2">
-          <div :if={@command_palette_results == []} class="px-4 py-6 text-center text-sm text-gray-500">
+          <div
+            :if={@command_palette_results == []}
+            class="px-4 py-6 text-center text-sm text-gray-500"
+          >
             No results found
           </div>
           <button
@@ -2710,5 +2809,4 @@ defmodule LoomkinWeb.WorkspaceLive do
       _ -> []
     end
   end
-
 end
