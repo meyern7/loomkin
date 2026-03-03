@@ -85,8 +85,8 @@ defmodule Loomkin.Teams.ConsensusPolicy do
   - `total_eligible` — number of agents who were eligible to vote
   """
   @spec quorum_met?(quorum(), float(), non_neg_integer(), non_neg_integer()) :: boolean()
-  def quorum_met?(:unanimous, _pct, total_voters, total_eligible) do
-    total_voters > 0 and total_voters == total_eligible
+  def quorum_met?(:unanimous, pct, total_voters, total_eligible) do
+    total_voters > 0 and total_voters == total_eligible and pct >= 100.0
   end
 
   def quorum_met?(:majority, pct, total_voters, _total_eligible) do

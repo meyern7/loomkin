@@ -138,10 +138,13 @@ defmodule Loomkin.Teams.ConsensusPolicyTest do
   end
 
   describe "quorum_met?/4" do
-    test "unanimous requires all eligible voters" do
+    test "unanimous requires all eligible voters AND 100% agreement" do
       assert ConsensusPolicy.quorum_met?(:unanimous, 100.0, 3, 3) == true
       assert ConsensusPolicy.quorum_met?(:unanimous, 100.0, 2, 3) == false
       assert ConsensusPolicy.quorum_met?(:unanimous, 100.0, 0, 0) == false
+      # Split vote: full participation but not unanimous agreement
+      assert ConsensusPolicy.quorum_met?(:unanimous, 50.0, 2, 2) == false
+      assert ConsensusPolicy.quorum_met?(:unanimous, 66.7, 3, 3) == false
     end
 
     test "majority requires > 50% weighted" do
