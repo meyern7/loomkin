@@ -73,8 +73,8 @@ defmodule Loomkin.Channels.Telegram.Webhook do
     if channel_id do
       channel_id_str = to_string(channel_id)
 
-      # Dispatch asynchronously so we respond to Telegram quickly
-      Task.start(fn ->
+      # Dispatch via Task.Supervisor so errors are logged and Ecto sandbox works in tests
+      Task.Supervisor.start_child(Loomkin.Channels.WebhookTaskSupervisor, fn ->
         case ChannelRouter.handle_inbound(
                Loomkin.Channels.Telegram.Adapter,
                :telegram,

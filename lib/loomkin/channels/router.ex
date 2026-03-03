@@ -10,6 +10,11 @@ defmodule Loomkin.Channels.Router do
 
   alias Loomkin.Channels.{AuditLog, Bindings, Bridge, BridgeSupervisor}
 
+  @adapters %{
+    telegram: Loomkin.Channels.Telegram.Adapter,
+    discord: Loomkin.Channels.Discord.Adapter
+  }
+
   @doc """
   Handle an inbound event from a channel adapter.
 
@@ -39,7 +44,11 @@ defmodule Loomkin.Channels.Router do
           end
 
         {:callback, callback_id, data} ->
-          handle_callback(channel, channel_id, callback_id, data)
+          callback_metadata = if is_map(data), do: data, else: %{}
+
+          with :ok <- check_user_acl(channel, callback_metadata) do
+            handle_callback(channel, channel_id, callback_id, data)
+          end
 
         :ignore ->
           {:ok, :ignored}
@@ -77,7 +86,7 @@ defmodule Loomkin.Channels.Router do
     else
       case Bindings.find_or_create(channel, channel_id, team_id) do
         {:ok, binding} ->
-          ensure_bridge(binding, channel)
+          ensure_bridge(binding, adapter_for(channel))
           {:ok, "Bound to team #{team_id}."}
 
         {:error, changeset} ->
@@ -416,4 +425,7 @@ defmodule Loomkin.Channels.Router do
       :error -> BridgeSupervisor.start_bridge(binding, adapter)
     end
   end
+
+  @doc false
+  def adapter_for(channel), do: Map.fetch!(@adapters, channel)
 end

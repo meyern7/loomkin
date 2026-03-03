@@ -89,14 +89,18 @@ defmodule Loomkin.Channels.Telegram.Adapter do
           end
         end)
 
+        # Include user info for ACL checks on callbacks
+        from = get_in(callback_query, ["from"]) || %{}
+        from_id = Map.get(from, "id")
+
         # Extract question_id from structured callback_data "ask_user:question_id:index"
         case String.split(data, ":", parts: 3) do
           ["ask_user", question_id, _index] ->
-            {:callback, question_id, data}
+            {:callback, question_id, %{raw: data, from_id: from_id}}
 
           _ ->
             # Legacy fallback: treat data as-is
-            {:callback, data, data}
+            {:callback, data, %{raw: data, from_id: from_id}}
         end
 
       # Regular text message

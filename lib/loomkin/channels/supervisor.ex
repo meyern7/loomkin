@@ -17,7 +17,8 @@ defmodule Loomkin.Channels.Supervisor do
     children =
       [
         Loomkin.Channels.AuditLog,
-        Loomkin.Channels.BridgeSupervisor
+        Loomkin.Channels.BridgeSupervisor,
+        {Task.Supervisor, name: Loomkin.Channels.WebhookTaskSupervisor}
       ] ++ telegram_children() ++ discord_children()
 
     Supervisor.init(children, strategy: :one_for_one)

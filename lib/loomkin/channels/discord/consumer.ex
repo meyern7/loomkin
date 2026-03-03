@@ -5,9 +5,11 @@ defmodule Loomkin.Channels.Discord.Consumer do
 
   Handles MESSAGE_CREATE for regular messages and INTERACTION_CREATE
   for button callbacks (ask_user responses).
-  """
 
-  use GenServer
+  When Nostrum is loaded, uses `Nostrum.Consumer` which auto-joins the
+  ConsumerGroup and dispatches events to `handle_event/1`. Otherwise
+  falls back to a plain GenServer (for compilation in test environments).
+  """
 
   require Logger
 
@@ -15,21 +17,22 @@ defmodule Loomkin.Channels.Discord.Consumer do
 
   @adapter Loomkin.Channels.Discord.Adapter
 
-  def start_link(opts \\ []) do
-    GenServer.start_link(__MODULE__, opts, name: __MODULE__)
-  end
+  # Use Nostrum.Consumer if available, otherwise fall back to GenServer
+  # so the module compiles even when Nostrum isn't loaded (e.g., in tests).
+  if Code.ensure_loaded?(Nostrum.Consumer) do
+    use Nostrum.Consumer
+  else
+    use GenServer
 
-  @impl true
-  def init(_opts) do
-    # Subscribe to Nostrum events when available
-    if Code.ensure_loaded?(Nostrum.Consumer) do
-      # Nostrum dispatches events to consumers via its consumer pipeline
-      Logger.info("[Discord.Consumer] Started, listening for Discord events")
-    else
-      Logger.warning("[Discord.Consumer] Nostrum not loaded, consumer inactive")
+    def start_link(opts \\ []) do
+      GenServer.start_link(__MODULE__, opts, name: __MODULE__)
     end
 
-    {:ok, %{}}
+    @impl true
+    def init(_opts) do
+      Logger.warning("[Discord.Consumer] Nostrum not loaded, consumer inactive")
+      {:ok, %{}}
+    end
   end
 
   @doc """
@@ -80,7 +83,9 @@ defmodule Loomkin.Channels.Discord.Consumer do
       channel_id: interaction.channel_id,
       guild_id: Map.get(interaction, :guild_id),
       token: interaction.token,
-      id: interaction.id
+      id: interaction.id,
+      member: Map.get(interaction, :member),
+      user: Map.get(interaction, :user)
     }
 
     case Router.handle_inbound(@adapter, :discord, channel_id, event) do

@@ -61,7 +61,25 @@ defmodule Loomkin.Channels.Bindings do
         {:ok, binding}
 
       nil ->
-        create_binding(%{channel: channel, channel_id: channel_id, team_id: team_id})
+        # Check for an inactive binding to reactivate (avoids unique constraint violation)
+        case get_inactive_by_channel(channel, channel_id) do
+          %Binding{} = inactive ->
+            inactive
+            |> Binding.changeset(%{active: true, team_id: team_id})
+            |> Repo.update()
+
+          nil ->
+            create_binding(%{channel: channel, channel_id: channel_id, team_id: team_id})
+        end
     end
+  end
+
+  @doc false
+  def get_inactive_by_channel(channel, channel_id) do
+    Repo.one(
+      from b in Binding,
+        where: b.channel == ^channel and b.channel_id == ^channel_id and b.active == false,
+        limit: 1
+    )
   end
 end

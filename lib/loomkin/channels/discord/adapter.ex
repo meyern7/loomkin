@@ -94,7 +94,8 @@ defmodule Loomkin.Channels.Discord.Adapter do
       ["ask_user", question_id, index_str] ->
         # Resolve the selected option label from the interaction
         {idx, _} = Integer.parse(index_str)
-        {:callback, question_id, %{index: idx, interaction: event}}
+        user_id = get_in(event, [:member, :user, :id]) || get_in(event, [:user, :id])
+        {:callback, question_id, %{index: idx, interaction: event, user_id: user_id}}
 
       _ ->
         :ignore
