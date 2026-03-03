@@ -4,7 +4,7 @@
 
 # Loomkin
 
-[![Discord](https://img.shields.io/discord/1234567890?color=5865F2&logo=discord&logoColor=white&label=Discord)](https://discord.gg/WUVneqArVD)
+[![Discord](https://img.shields.io/discord/1465498806698119317?color=5865F2&logo=discord&logoColor=white&label=Discord)](https://discord.gg/WUVneqArVD)
 
 **The AI coding assistant with a nervous system.**
 
