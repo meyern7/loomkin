@@ -1,7 +1,7 @@
 defmodule Loomkin.Teams.CollaborationEvents do
   @moduledoc "Emit standardized collaboration events for the activity feed."
 
-  alias Loomkin.Teams.Comms
+  alias Loomkin.Teams.{Comms, CollaborationMetrics}
 
   @type collab_event :: %{
           type: atom(),
@@ -91,9 +91,13 @@ defmodule Loomkin.Teams.CollaborationEvents do
 
   defp broadcast_collab(team_id, payload) do
     event = Map.put(payload, :timestamp, DateTime.utc_now())
+    # Record metrics backend-side (not in LiveView) so counts are accurate
+    # regardless of connected UI clients
+    CollaborationMetrics.record_event(team_id, payload.type)
     Comms.broadcast(team_id, {:collab_event, event})
   end
 
+  defp format_agents([]), do: "the team"
   defp format_agents([single]), do: single
   defp format_agents([a, b]), do: "#{a} and #{b}"
 

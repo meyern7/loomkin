@@ -125,12 +125,12 @@ defmodule Loomkin.Teams.ConflictDetector do
 
   # --- File edit tracking ---
 
+  # AgentLoop emits {:tool_executing, agent_name, %{tool_name: name, tool_target: path}}
+  # and {:tool_complete, agent_name, %{tool_name: name, result: text}}
   @impl true
-  def handle_info({:tool_executing, agent_name, %{tool: tool, args: args}}, state)
+  def handle_info({:tool_executing, agent_name, %{tool_name: tool, tool_target: file_path}}, state)
       when tool in ["file_write", "file_edit"] do
-    file_path = args["file_path"] || args[:file_path]
-
-    if file_path do
+    if file_path && file_path != "*" do
       state = track_file_edit(state, to_string(agent_name), file_path)
       {:noreply, state}
     else
@@ -139,16 +139,10 @@ defmodule Loomkin.Teams.ConflictDetector do
   end
 
   @impl true
-  def handle_info({:tool_complete, agent_name, %{tool: tool, args: args}}, state)
+  def handle_info({:tool_complete, agent_name, %{tool_name: tool}}, state)
       when tool in ["file_write", "file_edit"] do
-    file_path = args["file_path"] || args[:file_path]
-
-    if file_path do
-      state = track_file_edit(state, to_string(agent_name), file_path)
-      {:noreply, state}
-    else
-      {:noreply, state}
-    end
+    # tool_complete doesn't carry file_path, but tool_executing already tracked it
+    {:noreply, state}
   end
 
   # --- Task tracking ---
@@ -296,8 +290,8 @@ defmodule Loomkin.Teams.ConflictDetector do
         state
 
       node when node.node_type in [:decision, :option] ->
-        # Look for recent decision nodes on similar topics
-        recent = Graph.recent_decisions(20)
+        # Look for recent decision nodes on similar topics, scoped to this team
+        recent = Graph.recent_decisions(20, team_id: state.team_id)
 
         conflicts =
           recent

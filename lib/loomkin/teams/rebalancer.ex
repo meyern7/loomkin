@@ -36,6 +36,7 @@ defmodule Loomkin.Teams.Rebalancer do
     check_interval = Keyword.get(opts, :check_interval, @check_interval_ms)
 
     Phoenix.PubSub.subscribe(@pubsub, "team:#{team_id}")
+    Phoenix.PubSub.subscribe(@pubsub, "team:#{team_id}:tasks")
 
     state = %{
       team_id: team_id,
@@ -86,7 +87,11 @@ defmodule Loomkin.Teams.Rebalancer do
   end
 
   # Track activity signals — tool calls, messages sent, task events
-  def handle_info({:tool_result, agent_name, _tool, _result}, state) do
+  def handle_info({:tool_complete, agent_name, _payload}, state) do
+    {:noreply, record_activity(state, to_string(agent_name))}
+  end
+
+  def handle_info({:tool_executing, agent_name, _payload}, state) do
     {:noreply, record_activity(state, to_string(agent_name))}
   end
 

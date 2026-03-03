@@ -966,11 +966,10 @@ defmodule LoomkinWeb.WorkspaceLive do
     {:noreply, socket}
   end
 
-  # Collaboration events — render in activity feed and record metrics
+  # Collaboration events — render in activity feed (metrics recorded backend-side)
   def handle_info({:collab_event, payload}, socket) do
     socket =
       if team_id = socket.assigns[:team_id] do
-        Loomkin.Teams.CollaborationMetrics.record_event(team_id, payload.type)
         score = Loomkin.Teams.CollaborationMetrics.collaboration_score(team_id)
         assign(socket, collab_health: score)
       else

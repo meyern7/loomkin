@@ -70,7 +70,7 @@ defmodule Loomkin.Teams.RebalancerTest do
       old_activity = old_state.last_activity["alice"]
 
       Process.sleep(10)
-      Phoenix.PubSub.broadcast(@pubsub, "team:#{team_id}", {:tool_result, "alice", "file_read", "ok"})
+      Phoenix.PubSub.broadcast(@pubsub, "team:#{team_id}", {:tool_complete, "alice", %{tool_name: "file_read", result: "ok"}})
       Process.sleep(50)
 
       new_state = :sys.get_state(pid)
@@ -87,7 +87,7 @@ defmodule Loomkin.Teams.RebalancerTest do
         %{state | nudge_counts: Map.put(state.nudge_counts, "alice", 1)}
       end)
 
-      Phoenix.PubSub.broadcast(@pubsub, "team:#{team_id}", {:tool_result, "alice", "shell", "ok"})
+      Phoenix.PubSub.broadcast(@pubsub, "team:#{team_id}", {:tool_complete, "alice", %{tool_name: "shell", result: "ok"}})
       Process.sleep(50)
 
       state = :sys.get_state(pid)
