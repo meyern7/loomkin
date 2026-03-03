@@ -241,7 +241,7 @@ defmodule LoomkinWeb.TeamActivityComponent do
           {tool_icon(@tool_name)} {@tool_name}
         </span>
         <button
-          :if={@file_path}
+          :if={is_binary(@file_path)}
           phx-click="inspect_file"
           phx-value-path={@file_path}
           phx-target={@myself}
@@ -465,6 +465,15 @@ defmodule LoomkinWeb.TeamActivityComponent do
           class="text-xs text-yellow-400/60 hover:text-yellow-300 mt-0.5 transition"
         >
           show more
+        </button>
+        <button
+          :if={@long_content && @expanded}
+          phx-click="expand_event"
+          phx-value-id={@event.id}
+          phx-target={@myself}
+          class="text-xs text-yellow-400/60 hover:text-yellow-300 mt-0.5 transition"
+        >
+          show less
         </button>
       </div>
     </div>
