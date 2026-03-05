@@ -1990,7 +1990,10 @@ defmodule LoomkinWeb.WorkspaceLive do
             >
               {@focused_card.name}
             </span>
-            <span class="text-[10px] px-1.5 py-0.5 rounded font-medium text-muted" style="background: var(--brand-muted);">
+            <span
+              class="text-[10px] px-1.5 py-0.5 rounded font-medium text-muted"
+              style="background: var(--brand-muted);"
+            >
               {format_agent_role(@focused_card.role)}
             </span>
           </div>
@@ -3284,7 +3287,11 @@ defmodule LoomkinWeb.WorkspaceLive do
         %{}
       end
 
-    update_agent_card(socket, agent_name, Map.merge(%{status: status, updated_at: DateTime.utc_now()}, extra))
+    update_agent_card(
+      socket,
+      agent_name,
+      Map.merge(%{status: status, updated_at: DateTime.utc_now()}, extra)
+    )
   end
 
   defp update_card_task(socket, agent_name, task_desc) do

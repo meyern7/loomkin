@@ -118,6 +118,7 @@ defmodule Loomkin.Teams.QueryRouterTest do
       assert_receive {:query, ^query_id, "alice", "What is the auth format?", []}
     end
 
+    @tag :llm_dependent
     test "query with keeper includes context enrichment", %{team_id: team_id} do
       # Spawn a keeper with relevant context — topic has word overlap with query
       {:ok, _pid} =
@@ -159,6 +160,7 @@ defmodule Loomkin.Teams.QueryRouterTest do
       assert_receive {:query, ^query_id, "alice", "Will this work?", _enrichments}
     end
 
+    @tag :llm_dependent
     test "query state includes keeper enrichments", %{team_id: team_id} do
       {:ok, _pid} =
         DynamicSupervisor.start_child(

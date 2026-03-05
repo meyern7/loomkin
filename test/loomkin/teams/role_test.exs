@@ -75,8 +75,8 @@ defmodule Loomkin.Teams.RoleTest do
       assert Loomkin.Tools.Git in coder.tools
       assert Loomkin.Tools.DecisionLog in coder.tools
 
+      assert Loomkin.Tools.DecisionQuery in coder.tools
       refute Loomkin.Tools.SubAgent in coder.tools
-      refute Loomkin.Tools.DecisionQuery in coder.tools
     end
 
     test "reviewer has read-only, shell, and decision tools" do
@@ -97,10 +97,10 @@ defmodule Loomkin.Teams.RoleTest do
       assert Loomkin.Tools.Shell in tester.tools
       assert Loomkin.Tools.DecisionLog in tester.tools
 
+      assert Loomkin.Tools.DecisionQuery in tester.tools
       refute Loomkin.Tools.FileWrite in tester.tools
       refute Loomkin.Tools.FileEdit in tester.tools
       refute Loomkin.Tools.Git in tester.tools
-      refute Loomkin.Tools.DecisionQuery in tester.tools
     end
   end
 
@@ -114,8 +114,8 @@ defmodule Loomkin.Teams.RoleTest do
     test "returns legacy model for legacy tier atoms (backward compat)" do
       assert "zai:glm-4.5" = Role.model_for_tier(:grunt)
       assert "zai:glm-5" = Role.model_for_tier(:standard)
-      assert "anthropic:claude-sonnet-4-6" = Role.model_for_tier(:expert)
-      assert "anthropic:claude-opus-4-6" = Role.model_for_tier(:architect)
+      assert "zai:glm-5" = Role.model_for_tier(:expert)
+      assert "zai:glm-5" = Role.model_for_tier(:architect)
     end
 
     test "falls back to default model for unknown tier" do

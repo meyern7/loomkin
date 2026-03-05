@@ -160,6 +160,7 @@ defmodule Loomkin.Teams.ContextRetrievalTest do
   end
 
   describe "smart_retrieve/3" do
+    @tag :llm_dependent
     test "forces smart mode", %{team_id: team_id} do
       messages = [%{role: :user, content: "smart retrieval content"}]
       %{id: id} = spawn_keeper(team_id, topic: "smart topic", messages: messages)

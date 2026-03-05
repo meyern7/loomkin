@@ -29,7 +29,7 @@ defmodule Loomkin.Teams.ModelRouterTest do
     end
 
     test "task model_hint overrides default (atom hint)" do
-      assert "anthropic:claude-opus-4-6" = ModelRouter.select(:coder, %{model_hint: :architect})
+      assert "zai:glm-5" = ModelRouter.select(:coder, %{model_hint: :architect})
     end
 
     test "task model_hint overrides default (string tier hint)" do
@@ -71,9 +71,9 @@ defmodule Loomkin.Teams.ModelRouterTest do
   describe "tier_for_model/1" do
     test "returns correct tier for known models" do
       assert :grunt = ModelRouter.tier_for_model("zai:glm-4.5")
-      assert :standard = ModelRouter.tier_for_model("zai:glm-5")
-      assert :expert = ModelRouter.tier_for_model("anthropic:claude-sonnet-4-6")
-      assert :architect = ModelRouter.tier_for_model("anthropic:claude-opus-4-6")
+      # glm-5 is mapped to multiple tiers; tier_for_model returns the last-written key
+      tier = ModelRouter.tier_for_model("zai:glm-5")
+      assert tier in [:standard, :expert, :architect]
     end
 
     test "returns :standard for unknown model" do
@@ -239,8 +239,8 @@ defmodule Loomkin.Teams.ModelRouterTest do
       tiers = ModelRouter.configured_tiers()
       assert tiers[:grunt] == "zai:glm-4.5"
       assert tiers[:standard] == "zai:glm-5"
-      assert tiers[:expert] == "anthropic:claude-sonnet-4-6"
-      assert tiers[:architect] == "anthropic:claude-opus-4-6"
+      assert tiers[:expert] == "zai:glm-5"
+      assert tiers[:architect] == "zai:glm-5"
     end
   end
 

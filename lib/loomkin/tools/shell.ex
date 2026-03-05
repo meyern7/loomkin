@@ -162,7 +162,8 @@ defmodule Loomkin.Tools.Shell do
 
   defp execute_via_port(command, project_path, timeout) do
     port =
-      Port.open({:spawn, command}, [
+      Port.open({:spawn_executable, "/bin/sh"}, [
+        {:args, ["-c", command]},
         :binary,
         :exit_status,
         :stderr_to_stdout,

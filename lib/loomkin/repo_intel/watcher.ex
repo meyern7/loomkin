@@ -166,6 +166,10 @@ defmodule Loomkin.RepoIntel.Watcher do
       {:error, reason} ->
         Logger.warning("Failed to start file watcher: #{inspect(reason)}")
         %{state | project_path: project_path, gitignore_patterns: gitignore_patterns}
+
+      :ignore ->
+        Logger.warning("File watcher not available (missing inotifywait/fswatch?)")
+        %{state | project_path: project_path, gitignore_patterns: gitignore_patterns}
     end
   end
 

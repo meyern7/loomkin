@@ -60,8 +60,7 @@ defmodule Loomkin.Tools.TeamSpawn do
         role_atom = resolve_role(role)
 
         if is_nil(role_atom) do
-          {:error, name, role,
-           "unknown role. Valid: #{Enum.join(@valid_roles, ", ")}"}
+          {:error, name, role, "unknown role. Valid: #{Enum.join(@valid_roles, ", ")}"}
         else
           case Manager.spawn_agent(team_id, name, role_atom, spawn_opts) do
             {:ok, _pid} -> {:ok, name, role_atom}

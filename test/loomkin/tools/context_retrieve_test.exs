@@ -98,6 +98,7 @@ defmodule Loomkin.Tools.ContextRetrieveTest do
       assert result =~ "[assistant]: answer about raw"
     end
 
+    @tag :llm_dependent
     test "smart mode returns binary result", %{team_id: team_id} do
       %{id: id} =
         spawn_keeper(team_id,

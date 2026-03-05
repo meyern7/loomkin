@@ -73,8 +73,8 @@ defmodule Loomkin.Teams.CostTrackerTest do
         })
 
       usage = CostTracker.get_agent_usage(team_id, "coder")
-      # 1M input at $3/M + 1M output at $15/M = $18.00
-      assert_in_delta usage.cost, 18.0, 0.01
+      # 1M input at $0.95/M + 1M output at $3.79/M = $4.74 (zai:glm-5 pricing)
+      assert_in_delta usage.cost, 4.74, 0.01
     end
   end
 
@@ -192,8 +192,8 @@ defmodule Loomkin.Teams.CostTrackerTest do
         })
 
       [call] = CostTracker.get_call_history(team_id, "coder")
-      # $3 input + $15 output = $18
-      assert_in_delta call.cost, 18.0, 0.01
+      # $0.95 input + $3.79 output = $4.74 (zai:glm-5 pricing)
+      assert_in_delta call.cost, 4.74, 0.01
     end
 
     test "sets timestamp automatically if not provided", %{team_id: team_id} do

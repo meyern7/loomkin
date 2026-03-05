@@ -103,6 +103,7 @@ defmodule Loomkin.Teams.ContextOffloadTest do
       assert entry =~ "source=researcher"
     end
 
+    @tag :llm_dependent
     test "infers topic from first user message", %{team_id: team_id} do
       messages = [
         %{role: :user, content: "fix the authentication bug in login"},
@@ -117,6 +118,7 @@ defmodule Loomkin.Teams.ContextOffloadTest do
   end
 
   describe "generate_topic/1" do
+    @tag :llm_dependent
     test "falls back to infer_topic when LLM is unavailable" do
       messages = [
         %{role: :user, content: "fix the authentication bug in login"},
@@ -137,6 +139,7 @@ defmodule Loomkin.Teams.ContextOffloadTest do
       assert topic == "offloaded-context"
     end
 
+    @tag :llm_dependent
     test "falls back to infer_topic for messages with no user message" do
       messages = [%{role: :assistant, content: "some response"}]
       topic = ContextOffload.generate_topic(messages)

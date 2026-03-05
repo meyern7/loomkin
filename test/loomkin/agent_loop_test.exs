@@ -46,6 +46,7 @@ defmodule Loomkin.AgentLoopTest do
   end
 
   describe "run/2 with LLM error (no API key)" do
+    @tag :llm_dependent
     test "returns error when LLM call fails" do
       messages = [%{role: :user, content: "Hello"}]
 
@@ -62,6 +63,7 @@ defmodule Loomkin.AgentLoopTest do
       assert hd(returned_messages).role == :user
     end
 
+    @tag :llm_dependent
     test "invokes on_event callback even on error path" do
       test_pid = self()
 

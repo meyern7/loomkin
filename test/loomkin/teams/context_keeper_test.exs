@@ -184,6 +184,7 @@ defmodule Loomkin.Teams.ContextKeeperTest do
   end
 
   describe "smart_retrieve/2" do
+    @tag :llm_dependent
     test "falls back to keyword retrieval when LLM is unavailable" do
       messages = [
         %{role: :user, content: "elixir is great for concurrency"},
@@ -220,6 +221,7 @@ defmodule Loomkin.Teams.ContextKeeperTest do
       assert state_before.metadata == state_after.metadata
     end
 
+    @tag :llm_dependent
     test "returns ok tuple on fallback" do
       %{pid: pid} = start_keeper(messages: [%{role: :user, content: "test content"}])
 

@@ -51,7 +51,11 @@ defmodule LoomkinWeb.ContextInspectorComponent do
         class="hidden xl:flex absolute left-0 top-0 bottom-0 w-1 cursor-col-resize z-10 items-center justify-center group hover:bg-violet-500/20 active:bg-violet-500/30"
         style="transition: background 0.15s;"
       >
-        <div class="w-0.5 h-8 rounded-full bg-zinc-600 group-hover:bg-violet-400 group-active:bg-violet-400" style="transition: background 0.15s;"></div>
+        <div
+          class="w-0.5 h-8 rounded-full bg-zinc-600 group-hover:bg-violet-400 group-active:bg-violet-400"
+          style="transition: background 0.15s;"
+        >
+        </div>
       </div>
       <%= if @collapsed do %>
         <.collapsed_strip
