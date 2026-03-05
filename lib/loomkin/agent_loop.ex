@@ -450,6 +450,15 @@ defmodule Loomkin.AgentLoop do
     # validation expects atom keys (:pattern). Atomize known keys safely.
     atomized_args = atomize_known_keys(tool_args, tool_module)
 
+    # Auto-inject team_id from context when the tool requires it but the LLM
+    # didn't include it in the call (common with orienter/background agents).
+    atomized_args =
+      if not Map.has_key?(atomized_args, :team_id) and context[:team_id] do
+        Map.put(atomized_args, :team_id, context[:team_id])
+      else
+        atomized_args
+      end
+
     result =
       LoomkinTelemetry.span_tool_execute(tool_meta, fn ->
         try do

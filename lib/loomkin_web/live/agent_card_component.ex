@@ -30,8 +30,11 @@ defmodule LoomkinWeb.AgentCardComponent do
       phx-click="focus_card_agent"
       phx-value-agent={@card.name}
       class={[
-        "group relative rounded-xl border p-4 cursor-pointer animate-fade-in min-h-[140px] flex flex-col",
-        if(@focused, do: "card-brand", else: "bg-surface-1 border-subtle hover:bg-surface-2")
+        "group relative rounded-xl border p-4 animate-fade-in flex flex-col",
+        if(@focused,
+          do: "card-brand h-full",
+          else: "min-h-[140px] cursor-pointer bg-surface-1 border-subtle hover:bg-surface-2"
+        )
       ]}
       style="transition: background var(--transition-base), border-color var(--transition-base);"
     >
@@ -178,43 +181,24 @@ defmodule LoomkinWeb.AgentCardComponent do
         <%= case @card.content_type do %>
           <% :thinking -> %>
             <p
-              class="text-xs leading-relaxed line-clamp-4 animate-pulse"
+              class={["text-xs leading-relaxed animate-pulse", !@focused && "line-clamp-4"]}
               style="color: var(--text-secondary);"
             >
               {format_content(@card.latest_content)}
             </p>
-          <% :tool_call -> %>
-            <div class="flex items-center gap-1.5">
-              <span class="text-xs" style={"color: #{active_tool_config(@card).color}"}>
-                {active_tool_config(@card).icon}
-              </span>
-              <span
-                class="text-xs font-mono truncate"
-                style={"color: #{active_tool_config(@card).color}"}
-              >
-                {active_tool_name(@card)}
-              </span>
-            </div>
-            <p
-              :if={@card.latest_content}
-              class="text-xs mt-1 line-clamp-3 font-mono truncate"
-              style="color: var(--text-muted);"
-            >
-              {format_content(@card.latest_content)}
-            </p>
           <% :message -> %>
-            <p class="text-xs leading-relaxed line-clamp-4" style="color: var(--text-secondary);">
+            <p
+              class={["text-xs leading-relaxed", !@focused && "line-clamp-4"]}
+              style="color: var(--text-secondary);"
+            >
               {format_content(@card.latest_content)}
             </p>
           <% _ -> %>
             <p class="text-xs text-muted italic">idle</p>
         <% end %>
 
-        <%!-- Last tool (subtle, below content) --%>
-        <div
-          :if={@card.last_tool && @card.content_type != :tool_call}
-          class="mt-1.5 flex items-center gap-1.5"
-        >
+        <%!-- Last tool (always visible as subtle footer) --%>
+        <div :if={@card.last_tool} class="mt-1.5 flex items-center gap-1.5">
           <span
             class="text-[10px] opacity-60"
             style={"color: #{tool_config(@card.last_tool.name).color}"}
@@ -258,11 +242,6 @@ defmodule LoomkinWeb.AgentCardComponent do
     do: Map.get(@tool_config, name, @default_tool_config)
 
   defp tool_config(_), do: @default_tool_config
-
-  defp active_tool_name(%{last_tool: %{name: name}}) when is_binary(name), do: name
-  defp active_tool_name(_), do: "tool"
-
-  defp active_tool_config(card), do: tool_config(active_tool_name(card))
 
   # --- Formatting helpers ---
 

@@ -715,6 +715,10 @@ defmodule LoomkinWeb.WorkspaceLive do
     {:noreply, socket}
   end
 
+  def handle_event("unfocus_agent", _params, socket) do
+    {:noreply, assign(socket, focused_agent: nil, inspector_mode: nil)}
+  end
+
   def handle_event("reply_to_card_agent", %{"agent" => agent_name, "team-id" => team_id}, socket) do
     send(self(), {:reply_to_agent, agent_name, team_id})
     {:noreply, socket}
@@ -1276,10 +1280,16 @@ defmodule LoomkinWeb.WorkspaceLive do
     socket =
       socket
       |> assign(activity_events: events, streaming_agent: nil, streaming_thoughts: "")
-      |> update_agent_card(agent_name, %{
-        content_type: :idle,
-        updated_at: DateTime.utc_now()
-      })
+      |> then(fn s ->
+        # Preserve :message content — only reset to :idle if currently :thinking
+        card = get_in(s.assigns, [:agent_cards, agent_name])
+
+        if card && card.content_type == :message do
+          s
+        else
+          update_agent_card(s, agent_name, %{content_type: :idle, updated_at: DateTime.utc_now()})
+        end
+      end)
 
     {:noreply, socket}
   end
@@ -1908,7 +1918,15 @@ defmodule LoomkinWeb.WorkspaceLive do
       |> Enum.sort_by(fn {_, c} -> c.updated_at end, DateTime)
       |> Enum.map(fn {_name, card} -> card end)
 
-    assigns = assign(assigns, :sorted_cards, sorted_cards)
+    focused_card =
+      if assigns.focused_agent do
+        Map.get(assigns.agent_cards, assigns.focused_agent)
+      end
+
+    assigns =
+      assigns
+      |> assign(:sorted_cards, sorted_cards)
+      |> assign(:focused_card, focused_card)
 
     ~H"""
     <%!-- Left: Agent Cards + Comms + Composer (flex-1) --%>
@@ -1916,28 +1934,57 @@ defmodule LoomkinWeb.WorkspaceLive do
       class="flex-1 flex flex-col min-w-0 min-h-0 bg-surface-0"
       style="border-right: 1px solid var(--border-subtle);"
     >
-      <%!-- Agent Cards Grid --%>
-      <div class="flex-shrink-0 p-3 pb-0">
-        <div :if={@sorted_cards == []} class="text-center py-8">
-          <div class="text-muted text-xs">Waiting for agents to spawn...</div>
+      <%= if @focused_card do %>
+        <%!-- Focused single-agent view --%>
+        <div class="flex-1 flex flex-col min-h-0 p-3">
+          <div class="flex items-center gap-2 mb-3">
+            <button
+              phx-click="unfocus_agent"
+              class="text-xs text-muted hover:text-brand flex items-center gap-1"
+              style="transition: color var(--transition-base);"
+            >
+              <svg class="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
+                <path
+                  fill-rule="evenodd"
+                  d="M9.707 16.707a1 1 0 01-1.414 0l-6-6a1 1 0 010-1.414l6-6a1 1 0 011.414 1.414L5.414 9H17a1 1 0 110 2H5.414l4.293 4.293a1 1 0 010 1.414z"
+                  clip-rule="evenodd"
+                />
+              </svg>
+              All agents
+            </button>
+          </div>
+          <div class="flex-1 overflow-auto min-h-0">
+            <LoomkinWeb.AgentCardComponent.agent_card
+              card={@focused_card}
+              focused={true}
+              team_id={@active_team_id}
+            />
+          </div>
         </div>
-        <div class={["grid gap-3", card_grid_cols(length(@sorted_cards))]}>
-          <LoomkinWeb.AgentCardComponent.agent_card
-            :for={card <- @sorted_cards}
-            card={card}
-            focused={@focused_agent == card.name}
-            team_id={@active_team_id}
-          />
+      <% else %>
+        <%!-- Agent Cards Grid --%>
+        <div class="flex-shrink-0 p-3 pb-0">
+          <div :if={@sorted_cards == []} class="text-center py-8">
+            <div class="text-muted text-xs">Waiting for agents to spawn...</div>
+          </div>
+          <div class={["grid gap-3", card_grid_cols(length(@sorted_cards))]}>
+            <LoomkinWeb.AgentCardComponent.agent_card
+              :for={card <- @sorted_cards}
+              card={card}
+              focused={false}
+              team_id={@active_team_id}
+            />
+          </div>
         </div>
-      </div>
 
-      <%!-- Comms Feed (scrollable, takes remaining space) --%>
-      <div
-        class="flex-1 overflow-auto min-h-0"
-        style="border-top: 1px solid var(--border-subtle);"
-      >
-        <LoomkinWeb.AgentCommsComponent.comms_feed events={@comms_events} id="agent-comms" />
-      </div>
+        <%!-- Comms Feed (scrollable, takes remaining space) --%>
+        <div
+          class="flex-1 overflow-auto min-h-0"
+          style="border-top: 1px solid var(--border-subtle);"
+        >
+          <LoomkinWeb.AgentCommsComponent.comms_feed events={@comms_events} id="agent-comms" />
+        </div>
+      <% end %>
 
       <%!-- Budget bar --%>
       {render_budget_bar(assigns)}
@@ -3075,16 +3122,14 @@ defmodule LoomkinWeb.WorkspaceLive do
         socket
       end
 
-    # Tool calls and status updates go to agent cards
+    # Tool calls update only the last_tool footer — never overwrite message/thinking content
     case event.type do
       :tool_call ->
         update_agent_card(socket, event.agent, %{
-          content_type: :tool_call,
           last_tool: %{
             name: (event.metadata || %{})[:tool_name] || "tool",
             target: (event.metadata || %{})[:file_path]
           },
-          latest_content: event.content,
           updated_at: event.timestamp
         })
 
