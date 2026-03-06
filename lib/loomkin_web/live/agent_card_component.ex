@@ -22,6 +22,8 @@ defmodule LoomkinWeb.AgentCardComponent do
   attr :card, :map, required: true
   attr :focused, :boolean, default: false
   attr :team_id, :string, required: true
+  attr :queue_count, :integer, default: 0
+  attr :scheduled_count, :integer, default: 0
 
   def agent_card(assigns) do
     ~H"""
@@ -174,6 +176,33 @@ defmodule LoomkinWeb.AgentCardComponent do
             </svg>
           </button>
         </div>
+
+        <%!-- Queue badge --%>
+        <button
+          :if={@queue_count > 0}
+          phx-click="open_queue_drawer"
+          phx-value-agent={@card.name}
+          phx-value-team-id={@team_id}
+          class="flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-indigo-500/15 text-indigo-400 hover:bg-indigo-500/25 transition-colors cursor-pointer flex-shrink-0"
+          title={"#{@queue_count} queued messages"}
+        >
+          <svg class="w-3 h-3" viewBox="0 0 20 20" fill="currentColor">
+            <path d="M2 4.75A.75.75 0 012.75 4h14.5a.75.75 0 010 1.5H2.75A.75.75 0 012 4.75zm0 10.5a.75.75 0 01.75-.75h7.5a.75.75 0 010 1.5h-7.5a.75.75 0 01-.75-.75zM2 10a.75.75 0 01.75-.75h14.5a.75.75 0 010 1.5H2.75A.75.75 0 012 10z" />
+          </svg>
+          {@queue_count}
+        </button>
+
+        <%!-- Scheduled indicator --%>
+        <span
+          :if={@scheduled_count > 0}
+          class="flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-amber-500/15 text-amber-400 flex-shrink-0"
+          title={"#{@scheduled_count} scheduled messages"}
+        >
+          <svg class="w-3 h-3" viewBox="0 0 20 20" fill="currentColor">
+            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm.75-13a.75.75 0 00-1.5 0v5c0 .414.336.75.75.75h4a.75.75 0 000-1.5h-3.25V5z" clip-rule="evenodd" />
+          </svg>
+          {@scheduled_count}
+        </span>
       </div>
 
       <%!-- Content area --%>

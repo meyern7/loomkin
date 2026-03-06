@@ -18,6 +18,7 @@ defmodule Loomkin.Teams.Agent do
   alias Loomkin.Teams.Manager
   alias Loomkin.Teams.ModelRouter
   alias Loomkin.Teams.PriorityRouter
+  alias Loomkin.Teams.QueuedMessage
   alias Loomkin.Teams.RateLimiter
   alias Loomkin.Teams.Role
 
@@ -101,6 +102,43 @@ defmodule Loomkin.Teams.Agent do
   @doc "Inject steering guidance and resume a paused agent."
   def steer(pid, guidance) when is_binary(guidance) do
     GenServer.call(pid, {:resume, guidance: guidance}, 15_000)
+  end
+
+  @doc "Enqueue a user message without sending immediately (queues even if agent is idle)."
+  def enqueue(pid, text, opts \\ []) when is_pid(pid) and is_binary(text) do
+    GenServer.call(pid, {:enqueue, text, opts}, 15_000)
+  end
+
+  @doc "List all queued messages (returns both queues merged, priority first)."
+  def list_queue(pid) when is_pid(pid) do
+    GenServer.call(pid, :list_queue, 15_000)
+  end
+
+  @doc "Edit content of a queued message by ID."
+  def edit_queued(pid, message_id, new_content) when is_pid(pid) and is_binary(message_id) do
+    GenServer.call(pid, {:edit_queued, message_id, new_content}, 15_000)
+  end
+
+  @doc "Reorder queue -- takes list of message IDs in desired order."
+  def reorder_queue(pid, queue_type, ordered_ids)
+      when is_pid(pid) and queue_type in [:priority, :pending] and is_list(ordered_ids) do
+    GenServer.call(pid, {:reorder_queue, queue_type, ordered_ids}, 15_000)
+  end
+
+  @doc "Squash multiple queued messages into one."
+  def squash_queued(pid, message_ids, opts \\ [])
+      when is_pid(pid) and is_list(message_ids) do
+    GenServer.call(pid, {:squash_queued, message_ids, opts}, 15_000)
+  end
+
+  @doc "Delete a queued message by ID."
+  def delete_queued(pid, message_id) when is_pid(pid) and is_binary(message_id) do
+    GenServer.call(pid, {:delete_queued, message_id}, 15_000)
+  end
+
+  @doc "Inject guidance without pausing (non-disruptive steer)."
+  def inject_guidance(pid, text) when is_pid(pid) and is_binary(text) do
+    GenServer.call(pid, {:inject_guidance, text}, 15_000)
   end
 
   @doc "Send a permission response to this agent."
@@ -317,6 +355,170 @@ defmodule Loomkin.Teams.Agent do
 
   def handle_call({:checkpoint, _checkpoint}, _from, state) do
     {:reply, :continue, state}
+  end
+
+  @impl true
+  def handle_call({:enqueue, text, opts}, _from, state) do
+    priority = Keyword.get(opts, :priority, :normal)
+    source = Keyword.get(opts, :source, :user)
+    metadata = Keyword.get(opts, :metadata, %{})
+
+    qm =
+      QueuedMessage.new(
+        {:inject_system_message, text},
+        priority: priority,
+        source: source,
+        metadata: metadata
+      )
+
+    state =
+      if priority == :high do
+        %{state | priority_queue: state.priority_queue ++ [qm]}
+      else
+        %{state | pending_updates: state.pending_updates ++ [qm]}
+      end
+
+    broadcast_queue_update(state)
+    {:reply, {:ok, qm.id}, state}
+  end
+
+  @impl true
+  def handle_call(:list_queue, _from, state) do
+    {:reply, list_full_queue(state), state}
+  end
+
+  @impl true
+  def handle_call({:edit_queued, message_id, new_content}, _from, state) do
+    {found, state} = update_queued_message(state, message_id, fn qm ->
+      %{qm | content: new_content, status: :editing}
+    end)
+
+    if found do
+      broadcast_queue_update(state)
+      {:reply, :ok, state}
+    else
+      {:reply, {:error, :not_found}, state}
+    end
+  end
+
+  @impl true
+  def handle_call({:reorder_queue, queue_type, ordered_ids}, _from, state) do
+    {queue_field, state_field} =
+      case queue_type do
+        :priority -> {state.priority_queue, :priority_queue}
+        :pending -> {state.pending_updates, :pending_updates}
+      end
+
+    id_map = Map.new(queue_field, fn qm -> {qm.id, qm} end)
+
+    reordered =
+      ordered_ids
+      |> Enum.map(fn id -> Map.get(id_map, id) end)
+      |> Enum.reject(&is_nil/1)
+
+    # Append any messages not in ordered_ids (safety net)
+    remaining_ids = MapSet.new(ordered_ids)
+
+    leftover =
+      Enum.reject(queue_field, fn qm -> MapSet.member?(remaining_ids, qm.id) end)
+
+    state = Map.put(state, state_field, reordered ++ leftover)
+    broadcast_queue_update(state)
+    {:reply, :ok, state}
+  end
+
+  @impl true
+  def handle_call({:squash_queued, message_ids, opts}, _from, state) do
+    id_set = MapSet.new(message_ids)
+
+    {matched_priority, rest_priority} =
+      Enum.split_with(state.priority_queue, fn qm -> MapSet.member?(id_set, qm.id) end)
+
+    {matched_pending, rest_pending} =
+      Enum.split_with(state.pending_updates, fn qm -> MapSet.member?(id_set, qm.id) end)
+
+    all_matched = matched_priority ++ matched_pending
+
+    if length(all_matched) < 2 do
+      {:reply, {:error, :not_enough_messages}, state}
+    else
+      # Merge contents: user messages get concatenated, tuples get wrapped in a list
+      squashed_content =
+        case Keyword.get(opts, :content) do
+          nil ->
+            all_matched
+            |> Enum.map(fn qm -> qm.content end)
+            |> squash_contents()
+
+          custom when is_binary(custom) ->
+            {:inject_system_message, custom}
+        end
+
+      # Use the highest priority from the matched set
+      highest_priority =
+        all_matched
+        |> Enum.map(fn qm -> qm.priority end)
+        |> Enum.min_by(fn
+          :urgent -> 0
+          :high -> 1
+          :normal -> 2
+        end)
+
+      squashed =
+        QueuedMessage.new(squashed_content,
+          priority: highest_priority,
+          source: :user,
+          metadata: %{squashed_from: Enum.map(all_matched, & &1.id)}
+        )
+
+      squashed = %{squashed | status: :squashed}
+
+      # Place squashed message in the appropriate queue
+      state =
+        if highest_priority in [:urgent, :high] do
+          %{state | priority_queue: rest_priority ++ [squashed], pending_updates: rest_pending}
+        else
+          %{state | priority_queue: rest_priority, pending_updates: rest_pending ++ [squashed]}
+        end
+
+      broadcast_queue_update(state)
+      {:reply, {:ok, squashed.id}, state}
+    end
+  end
+
+  @impl true
+  def handle_call({:delete_queued, message_id}, _from, state) do
+    orig_count =
+      length(state.priority_queue) + length(state.pending_updates)
+
+    priority_queue = Enum.reject(state.priority_queue, fn qm -> qm.id == message_id end)
+    pending_updates = Enum.reject(state.pending_updates, fn qm -> qm.id == message_id end)
+
+    new_count = length(priority_queue) + length(pending_updates)
+
+    state = %{state | priority_queue: priority_queue, pending_updates: pending_updates}
+
+    if new_count < orig_count do
+      broadcast_queue_update(state)
+      {:reply, :ok, state}
+    else
+      {:reply, {:error, :not_found}, state}
+    end
+  end
+
+  @impl true
+  def handle_call({:inject_guidance, text}, _from, state) do
+    qm =
+      QueuedMessage.new(
+        {:inject_system_message, "[User Guidance]: #{text}"},
+        priority: :high,
+        source: :user,
+        metadata: %{type: :guidance}
+      )
+
+    state = %{state | priority_queue: state.priority_queue ++ [qm]}
+    broadcast_queue_update(state)
+    {:reply, :ok, state}
   end
 
   @impl true
@@ -613,6 +815,16 @@ defmodule Loomkin.Teams.Agent do
 
   # --- Priority dispatcher (active during loop) ---
 
+  # Signals must be dispatched even during active loops (not queued as raw tuples).
+  @impl true
+  def handle_info({:signal, %Jido.Signal{} = sig}, %{loop_task: {_task, _from}} = state) do
+    if signal_for_this_team?(sig, state) do
+      handle_info(sig, state)
+    else
+      {:noreply, state}
+    end
+  end
+
   @impl true
   def handle_info(msg, %{loop_task: {_task, _from}} = state) when is_tuple(msg) do
     case PriorityRouter.classify(msg) do
@@ -620,10 +832,16 @@ defmodule Loomkin.Teams.Agent do
         handle_urgent(msg, state)
 
       {:high, _type} ->
-        {:noreply, %{state | priority_queue: state.priority_queue ++ [msg]}}
+        qm = QueuedMessage.new(msg, priority: :high, source: :system)
+        state = %{state | priority_queue: state.priority_queue ++ [qm]}
+        broadcast_queue_update(state)
+        {:noreply, state}
 
       {:normal, _type} ->
-        {:noreply, %{state | pending_updates: state.pending_updates ++ [msg]}}
+        qm = QueuedMessage.new(msg, priority: :normal, source: :system)
+        state = %{state | pending_updates: state.pending_updates ++ [qm]}
+        broadcast_queue_update(state)
+        {:noreply, state}
 
       {:ignore, _type} ->
         {:noreply, state}
@@ -740,6 +958,10 @@ defmodule Loomkin.Teams.Agent do
   end
 
   def handle_info(%Jido.Signal{type: "agent.usage"}, state) do
+    {:noreply, state}
+  end
+
+  def handle_info(%Jido.Signal{type: "agent.queue.updated"}, state) do
     {:noreply, state}
   end
 
@@ -1474,9 +1696,82 @@ defmodule Loomkin.Teams.Agent do
   end
 
   defp drain_queues(state) do
-    Enum.each(state.priority_queue, fn msg -> send(self(), msg) end)
-    Enum.each(state.pending_updates, fn msg -> send(self(), msg) end)
-    %{state | priority_queue: [], pending_updates: []}
+    had_messages? = state.priority_queue != [] or state.pending_updates != []
+
+    Enum.each(state.priority_queue, fn qm -> send(self(), QueuedMessage.to_dispatchable(qm)) end)
+
+    Enum.each(state.pending_updates, fn qm ->
+      send(self(), QueuedMessage.to_dispatchable(qm))
+    end)
+
+    state = %{state | priority_queue: [], pending_updates: []}
+    if had_messages?, do: broadcast_queue_update(state)
+    state
+  end
+
+  defp list_full_queue(state) do
+    state.priority_queue ++ state.pending_updates
+  end
+
+  defp broadcast_queue_update(state) do
+    queue = list_full_queue(state)
+
+    Loomkin.Signals.Agent.QueueUpdated.new!(%{
+      agent_name: to_string(state.name),
+      team_id: state.team_id
+    })
+    |> Map.put(:data, %{
+      agent_name: to_string(state.name),
+      team_id: state.team_id,
+      queue: queue
+    })
+    |> Loomkin.Signals.Extensions.Causality.attach(
+      team_id: state.team_id,
+      agent_name: to_string(state.name)
+    )
+    |> Loomkin.Signals.publish()
+  rescue
+    e ->
+      Logger.debug("[Agent] Queue update signal failed: #{Exception.message(e)}")
+      :ok
+  end
+
+  defp update_queued_message(state, message_id, update_fn) do
+    case find_and_update_in(state.priority_queue, message_id, update_fn) do
+      {:ok, updated} ->
+        {true, %{state | priority_queue: updated}}
+
+      :not_found ->
+        case find_and_update_in(state.pending_updates, message_id, update_fn) do
+          {:ok, updated} ->
+            {true, %{state | pending_updates: updated}}
+
+          :not_found ->
+            {false, state}
+        end
+    end
+  end
+
+  defp find_and_update_in(queue, message_id, update_fn) do
+    case Enum.split_while(queue, fn qm -> qm.id != message_id end) do
+      {_before, []} ->
+        :not_found
+
+      {before, [target | after_target]} ->
+        {:ok, before ++ [update_fn.(target) | after_target]}
+    end
+  end
+
+  defp squash_contents(contents) do
+    # Extract text from inject_system_message tuples, concatenate
+    texts =
+      Enum.map(contents, fn
+        {:inject_system_message, text} when is_binary(text) -> text
+        text when is_binary(text) -> text
+        other -> inspect(other)
+      end)
+
+    {:inject_system_message, Enum.join(texts, "\n---\n")}
   end
 
   defp handle_urgent({:abort_task, _reason}, state) do
@@ -1517,7 +1812,10 @@ defmodule Loomkin.Teams.Agent do
     # Queue as an internal message so it survives the loop result handler
     # (which overwrites state.messages with the task-returned msgs).
     inject = {:inject_system_message, "[URGENT] File conflict detected: #{inspect(details)}"}
-    {:noreply, %{state | priority_queue: state.priority_queue ++ [inject]}}
+    qm = QueuedMessage.new(inject, priority: :urgent, source: :system)
+    state = %{state | priority_queue: state.priority_queue ++ [qm]}
+    broadcast_queue_update(state)
+    {:noreply, state}
   end
 
   defp handle_urgent(_msg, state), do: {:noreply, state}

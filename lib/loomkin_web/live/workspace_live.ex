@@ -69,7 +69,15 @@ defmodule LoomkinWeb.WorkspaceLive do
         cached_agents: [],
         cached_tasks: [],
         cached_budget: %{spent: 0.0, limit: 5.0},
-        last_user_message: nil
+        last_user_message: nil,
+        # Message queue UI state
+        queue_drawer: nil,
+        schedule_popover: false,
+        agent_queues: %{},
+        scheduled_messages: [],
+        queue_selected_ids: MapSet.new(),
+        queue_editing_id: nil,
+        schedule_delay_minutes: 5
       )
 
     case socket.assigns.live_action do
@@ -751,6 +759,265 @@ defmodule LoomkinWeb.WorkspaceLive do
   def handle_event("steer_card_agent", %{"agent" => agent_name, "team-id" => team_id}, socket) do
     send(self(), {:steer_agent, agent_name, team_id})
     {:noreply, socket}
+  end
+
+  # --- Queue Drawer ---
+
+  def handle_event("open_queue_drawer", %{"agent" => agent_name, "team-id" => team_id}, socket) do
+    {:noreply,
+     assign(socket,
+       queue_drawer: %{agent: agent_name, team_id: team_id},
+       queue_selected_ids: MapSet.new(),
+       queue_editing_id: nil
+     )}
+  end
+
+  def handle_event("toggle_queue_from_composer", _params, socket) do
+    case socket.assigns.reply_target do
+      %{agent: agent_name, team_id: team_id} ->
+        {:noreply,
+         assign(socket,
+           queue_drawer: %{agent: agent_name, team_id: team_id},
+           queue_selected_ids: MapSet.new(),
+           queue_editing_id: nil
+         )}
+
+      _ ->
+        {:noreply, socket}
+    end
+  end
+
+  def handle_event("close_queue_drawer", _params, socket) do
+    {:noreply,
+     assign(socket,
+       queue_drawer: nil,
+       queue_selected_ids: MapSet.new(),
+       queue_editing_id: nil
+     )}
+  end
+
+  def handle_event("toggle_queue_select", %{"agent" => _agent, "id" => id}, socket) do
+    selected = socket.assigns.queue_selected_ids
+
+    selected =
+      if MapSet.member?(selected, id) do
+        MapSet.delete(selected, id)
+      else
+        MapSet.put(selected, id)
+      end
+
+    {:noreply, assign(socket, queue_selected_ids: selected)}
+  end
+
+  def handle_event("deselect_all_queued", _params, socket) do
+    {:noreply, assign(socket, queue_selected_ids: MapSet.new())}
+  end
+
+  def handle_event("start_queued_edit", %{"id" => id}, socket) do
+    {:noreply, assign(socket, queue_editing_id: id)}
+  end
+
+  def handle_event("cancel_queued_edit", _params, socket) do
+    {:noreply, assign(socket, queue_editing_id: nil)}
+  end
+
+  def handle_event("save_queued_edit", %{"agent" => agent_name, "message_id" => id, "content" => content}, socket) do
+    team_id = get_in(socket.assigns, [:queue_drawer, :team_id]) || socket.assigns.active_team_id
+
+    case Loomkin.Teams.Manager.find_agent(team_id, agent_name) do
+      {:ok, pid} ->
+        Loomkin.Teams.Agent.edit_queued(pid, id, content)
+
+      :error ->
+        Logger.warning("[WorkspaceLive] Cannot edit queued — agent #{agent_name} not found")
+    end
+
+    {:noreply, assign(socket, queue_editing_id: nil)}
+  end
+
+  def handle_event("delete_queued", %{"agent" => agent_name, "id" => id}, socket) do
+    team_id = get_in(socket.assigns, [:queue_drawer, :team_id]) || socket.assigns.active_team_id
+
+    case Loomkin.Teams.Manager.find_agent(team_id, agent_name) do
+      {:ok, pid} ->
+        Loomkin.Teams.Agent.delete_queued(pid, id)
+
+      :error ->
+        Logger.warning("[WorkspaceLive] Cannot delete queued — agent #{agent_name} not found")
+    end
+
+    {:noreply, socket}
+  end
+
+  def handle_event("delete_selected_queued", %{"agent" => agent_name}, socket) do
+    team_id = get_in(socket.assigns, [:queue_drawer, :team_id]) || socket.assigns.active_team_id
+    ids = MapSet.to_list(socket.assigns.queue_selected_ids)
+
+    case Loomkin.Teams.Manager.find_agent(team_id, agent_name) do
+      {:ok, pid} ->
+        Enum.each(ids, fn id -> Loomkin.Teams.Agent.delete_queued(pid, id) end)
+
+      :error ->
+        Logger.warning("[WorkspaceLive] Cannot delete queued — agent #{agent_name} not found")
+    end
+
+    {:noreply, assign(socket, queue_selected_ids: MapSet.new())}
+  end
+
+  def handle_event("squash_queued", %{"agent" => agent_name}, socket) do
+    team_id = get_in(socket.assigns, [:queue_drawer, :team_id]) || socket.assigns.active_team_id
+    ids = MapSet.to_list(socket.assigns.queue_selected_ids)
+
+    case Loomkin.Teams.Manager.find_agent(team_id, agent_name) do
+      {:ok, pid} ->
+        Loomkin.Teams.Agent.squash_queued(pid, ids)
+
+      :error ->
+        Logger.warning("[WorkspaceLive] Cannot squash queued — agent #{agent_name} not found")
+    end
+
+    {:noreply, assign(socket, queue_selected_ids: MapSet.new())}
+  end
+
+  def handle_event("reorder_queue", %{"agent" => agent_name, "ids" => ordered_ids}, socket) do
+    team_id = get_in(socket.assigns, [:queue_drawer, :team_id]) || socket.assigns.active_team_id
+
+    case Loomkin.Teams.Manager.find_agent(team_id, agent_name) do
+      {:ok, pid} ->
+        Loomkin.Teams.Agent.reorder_queue(pid, :pending, ordered_ids)
+
+      :error ->
+        Logger.warning("[WorkspaceLive] Cannot reorder queue — agent #{agent_name} not found")
+    end
+
+    {:noreply, socket}
+  end
+
+  # --- Schedule Messages ---
+
+  def handle_event("toggle_scheduler", _params, socket) do
+    {:noreply, assign(socket, schedule_popover: !socket.assigns.schedule_popover)}
+  end
+
+  def handle_event("close_scheduler", _params, socket) do
+    {:noreply, assign(socket, schedule_popover: false)}
+  end
+
+  def handle_event("set_schedule_delay", %{"minutes" => minutes}, socket) do
+    {:noreply, assign(socket, schedule_delay_minutes: String.to_integer(minutes))}
+  end
+
+  def handle_event("schedule_message", %{"content" => content, "delay_minutes" => delay} = params, socket) do
+    target_agent = params["target_agent"]
+    delay_minutes = String.to_integer(delay)
+    team_id = socket.assigns.active_team_id
+
+    scheduled_msg = %{
+      id: Ecto.UUID.generate(),
+      content: content,
+      target_agent: target_agent,
+      team_id: team_id,
+      delay_minutes: delay_minutes,
+      deliver_at: DateTime.add(DateTime.utc_now(), delay_minutes * 60, :second),
+      scheduled_at: DateTime.utc_now()
+    }
+
+    scheduled = socket.assigns.scheduled_messages ++ [scheduled_msg]
+
+    # Start a timer process to deliver the message
+    Process.send_after(self(), {:deliver_scheduled, scheduled_msg.id}, delay_minutes * 60 * 1000)
+
+    {:noreply,
+     socket
+     |> assign(
+       scheduled_messages: scheduled,
+       schedule_popover: false,
+       input_text: ""
+     )
+     |> put_flash(:info, "Message scheduled for #{delay_minutes}m from now")
+     |> push_event("clear-input", %{})}
+  end
+
+  def handle_event("cancel_scheduled", %{"id" => id}, socket) do
+    scheduled = Enum.reject(socket.assigns.scheduled_messages, &(&1.id == id))
+    {:noreply, assign(socket, scheduled_messages: scheduled)}
+  end
+
+  # --- Enqueue & Guidance ---
+
+  def handle_event("enqueue_message", _params, socket) do
+    text = String.trim(socket.assigns.input_text || "")
+
+    if text == "" do
+      {:noreply, socket}
+    else
+      case socket.assigns.reply_target do
+        %{agent: agent_name, team_id: team_id} ->
+          case Loomkin.Teams.Manager.find_agent(team_id, agent_name) do
+            {:ok, pid} ->
+              Loomkin.Teams.Agent.enqueue(pid, %{
+                content: text,
+                source: :user,
+                priority: :normal
+              })
+
+            :error ->
+              Logger.warning("[WorkspaceLive] Cannot enqueue — agent #{agent_name} not found")
+          end
+
+          {:noreply,
+           socket
+           |> assign(input_text: "")
+           |> put_flash(:info, "Message queued for #{agent_name}")
+           |> push_event("clear-input", %{})}
+
+        _ ->
+          {:noreply, socket}
+      end
+    end
+  end
+
+  def handle_event("inject_guidance", _params, socket) do
+    text = String.trim(socket.assigns.input_text || "")
+
+    if text == "" do
+      {:noreply, socket}
+    else
+      case socket.assigns.reply_target do
+        %{agent: agent_name, team_id: team_id} ->
+          case Loomkin.Teams.Manager.find_agent(team_id, agent_name) do
+            {:ok, pid} ->
+              Loomkin.Teams.Agent.inject_guidance(pid, text)
+
+            :error ->
+              Logger.warning("[WorkspaceLive] Cannot inject guidance — agent #{agent_name} not found")
+          end
+
+          guidance_event = %{
+            id: Ecto.UUID.generate(),
+            type: :message,
+            agent: "You",
+            content: "[Guidance to #{agent_name}]: #{text}",
+            timestamp: DateTime.utc_now(),
+            expanded: false,
+            metadata: %{from: "You", to: agent_name, action: :guidance}
+          }
+
+          events = cap_events(socket.assigns.activity_events ++ [guidance_event])
+
+          {:noreply,
+           socket
+           |> assign(
+             input_text: "",
+             activity_events: events,
+             last_user_message: %{text: text, to: agent_name}
+           )
+           |> push_event("clear-input", %{})}
+
+        _ ->
+          {:noreply, socket}
+      end
+    end
   end
 
   # --- Component Info Messages ---
@@ -1870,6 +2137,56 @@ defmodule LoomkinWeb.WorkspaceLive do
   end
 
   # Catch-all for unhandled PubSub messages (team events, etc.)
+  # --- Queue & Schedule PubSub ---
+
+  def handle_info({:queue_updated, agent_name, queue}, socket) do
+    agent_queues = Map.put(socket.assigns.agent_queues, agent_name, queue)
+    {:noreply, assign(socket, agent_queues: agent_queues)}
+  end
+
+  def handle_info({:schedule_updated, _team_id, scheduled}, socket) do
+    {:noreply, assign(socket, scheduled_messages: scheduled)}
+  end
+
+  def handle_info({:scheduled_delivered, _message_id, agent_name}, socket) do
+    {:noreply, put_flash(socket, :info, "Scheduled message delivered to #{agent_name}")}
+  end
+
+  def handle_info({:deliver_scheduled, message_id}, socket) do
+    case Enum.find(socket.assigns.scheduled_messages, &(&1.id == message_id)) do
+      nil ->
+        # Already cancelled
+        {:noreply, socket}
+
+      msg ->
+        team_id = msg.team_id
+        target = msg.target_agent
+        content = msg.content
+
+        if target do
+          case Loomkin.Teams.Manager.find_agent(team_id, target) do
+            {:ok, pid} ->
+              Task.Supervisor.start_child(Loomkin.Teams.TaskSupervisor, fn ->
+                Loomkin.Teams.Agent.send_message(pid, content)
+              end)
+
+            :error ->
+              Logger.warning("[WorkspaceLive] Scheduled delivery failed — agent #{target} not found")
+          end
+        else
+          Session.send_message(socket.assigns.session_id, content)
+        end
+
+        scheduled = Enum.reject(socket.assigns.scheduled_messages, &(&1.id == message_id))
+
+        {:noreply,
+         socket
+         |> assign(scheduled_messages: scheduled)
+         |> put_flash(:info, "Scheduled message delivered to #{target || "Team"}")}
+    end
+  end
+
+  # Catch-all
   def handle_info(msg, socket) do
     Logger.info("[WorkspaceLive] UNHANDLED message: #{inspect(msg, limit: 200)}")
     {:noreply, socket}
@@ -2159,12 +2476,17 @@ defmodule LoomkinWeb.WorkspaceLive do
         Map.get(assigns.agent_cards, assigns.focused_agent)
       end
 
+    agent_queues = assigns.agent_queues
+    scheduled_messages = assigns.scheduled_messages
+
     assigns =
       assigns
       |> assign(:sorted_cards, all_cards)
       |> assign(:concierge_card, concierge_card)
       |> assign(:worker_cards, worker_cards)
       |> assign(:focused_card, focused_card)
+      |> assign(:agent_queues, agent_queues)
+      |> assign(:scheduled_messages, scheduled_messages)
 
     ~H"""
     <%!-- Left: Agent Cards + Comms + Composer (flex-1) --%>
@@ -2208,6 +2530,8 @@ defmodule LoomkinWeb.WorkspaceLive do
               card={@focused_card}
               focused={true}
               team_id={@active_team_id}
+              queue_count={queue_count_for(@agent_queues, @focused_card.name)}
+              scheduled_count={scheduled_count_for(@scheduled_messages, @focused_card.name)}
             />
           </div>
         </div>
@@ -2218,6 +2542,8 @@ defmodule LoomkinWeb.WorkspaceLive do
             card={@concierge_card}
             focused={false}
             team_id={@active_team_id}
+            queue_count={queue_count_for(@agent_queues, @concierge_card.name)}
+            scheduled_count={scheduled_count_for(@scheduled_messages, @concierge_card.name)}
           />
         </div>
 
@@ -2238,6 +2564,8 @@ defmodule LoomkinWeb.WorkspaceLive do
               card={card}
               focused={false}
               team_id={@active_team_id}
+              queue_count={queue_count_for(@agent_queues, card.name)}
+              scheduled_count={scheduled_count_for(@scheduled_messages, card.name)}
             />
           </div>
         </div>
@@ -2259,6 +2587,16 @@ defmodule LoomkinWeb.WorkspaceLive do
 
       <%!-- Sticky composer --%>
       {render_input_bar(assigns)}
+
+      <%!-- Queue drawer overlay --%>
+      <LoomkinWeb.MessageQueueComponent.queue_drawer
+        :if={@queue_drawer}
+        queue={Map.get(@agent_queues, @queue_drawer.agent, [])}
+        agent_name={@queue_drawer.agent}
+        team_id={@queue_drawer.team_id}
+        selected_ids={@queue_selected_ids}
+        editing_id={@queue_editing_id}
+      />
     </div>
 
     <%!-- Right: Context Inspector (w-80, collapsible) --%>
@@ -2466,6 +2804,21 @@ defmodule LoomkinWeb.WorkspaceLive do
             </div>
           </div>
 
+          <%!-- Queue button --%>
+          <div class="relative flex-shrink-0">
+            <button
+              type="button"
+              phx-click="toggle_queue_from_composer"
+              class="flex items-center justify-center h-9 px-2 rounded-lg transition-all duration-200 press-down"
+              style={"border: 1px solid var(--border-subtle); color: var(--text-muted); background: transparent;"}
+              title="View message queue"
+            >
+              <svg class="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
+                <path d="M2 4.75A.75.75 0 012.75 4h14.5a.75.75 0 010 1.5H2.75A.75.75 0 012 4.75zm0 10.5a.75.75 0 01.75-.75h7.5a.75.75 0 010 1.5h-7.5a.75.75 0 01-.75-.75zM2 10a.75.75 0 01.75-.75h14.5a.75.75 0 010 1.5H2.75A.75.75 0 012 10z" />
+              </svg>
+            </button>
+          </div>
+
           <%!-- Textarea --%>
           <div class="flex-1 relative">
             <textarea
@@ -2522,6 +2875,59 @@ defmodule LoomkinWeb.WorkspaceLive do
             <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
               <rect x="6" y="6" width="12" height="12" rx="2" />
             </svg>
+          </button>
+
+          <%!-- Schedule button --%>
+          <div :if={@status != :thinking} class="relative flex-shrink-0">
+            <button
+              type="button"
+              phx-click="toggle_scheduler"
+              class="flex items-center justify-center w-9 h-9 rounded-lg transition-all duration-200 press-down"
+              style={"border: 1px solid " <> if(@schedule_popover, do: "var(--border-brand)", else: "var(--border-subtle)") <> "; color: " <> if(@schedule_popover, do: "var(--text-brand)", else: "var(--text-muted)") <> "; background: transparent;"}
+              title="Schedule message"
+            >
+              <svg class="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
+                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm.75-13a.75.75 0 00-1.5 0v5c0 .414.336.75.75.75h4a.75.75 0 000-1.5h-3.25V5z" clip-rule="evenodd" />
+              </svg>
+            </button>
+
+            <%!-- Schedule popover --%>
+            <LoomkinWeb.ScheduleMessageComponent.schedule_popover
+              :if={@schedule_popover}
+              target_agent={if(@reply_target, do: @reply_target.agent)}
+              content={@input_text}
+              delay_minutes={@schedule_delay_minutes}
+              scheduled_messages={@scheduled_messages}
+            />
+          </div>
+
+          <%!-- Enqueue button (add to queue without sending) --%>
+          <button
+            :if={@status != :thinking && @reply_target}
+            type="button"
+            phx-click="enqueue_message"
+            class="flex items-center justify-center w-9 h-9 rounded-lg transition-all duration-200 press-down"
+            style="border: 1px solid var(--border-subtle); color: var(--text-muted); background: transparent;"
+            title={"Add to #{@reply_target.agent}'s queue"}
+          >
+            <svg class="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
+              <path d="M10.75 4.75a.75.75 0 00-1.5 0v4.5h-4.5a.75.75 0 000 1.5h4.5v4.5a.75.75 0 001.5 0v-4.5h4.5a.75.75 0 000-1.5h-4.5v-4.5z" />
+            </svg>
+          </button>
+
+          <%!-- Inject guidance button (when agent is working) --%>
+          <button
+            :if={@status != :thinking && @reply_target && agent_is_working?(@agent_cards, @reply_target.agent)}
+            type="button"
+            phx-click="inject_guidance"
+            class="flex items-center gap-1 h-9 px-2.5 rounded-lg transition-all duration-200 press-down text-[11px] font-medium"
+            style="border: 1px solid rgba(52, 211, 153, 0.3); color: #34d399; background: rgba(52, 211, 153, 0.08);"
+            title={"Guide #{@reply_target.agent} without pausing"}
+          >
+            <svg class="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
+              <path fill-rule="evenodd" d="M9.69 18.933l.003.001C9.89 19.02 10 19 10 19s.11.02.308-.066l.002-.001.006-.003.018-.008a5.741 5.741 0 00.281-.14c.186-.096.446-.24.757-.433.62-.384 1.445-.966 2.274-1.765C15.302 14.988 17 12.493 17 9A7 7 0 103 9c0 3.492 1.698 5.988 3.355 7.584a13.731 13.731 0 002.274 1.765 11.307 11.307 0 00.757.433c.11.057.19.095.237.117l.025.012.006.003zm.28-12.182a1.25 1.25 0 10-1.94 1.577 1.25 1.25 0 001.94-1.577zM10 11a2 2 0 100-4 2 2 0 000 4z" clip-rule="evenodd" />
+            </svg>
+            Guide
           </button>
         </div>
 
@@ -4237,6 +4643,23 @@ defmodule LoomkinWeb.WorkspaceLive do
       e ->
         Logger.warning("[WorkspaceLive] Failed to load channel bindings: #{Exception.message(e)}")
         []
+    end
+  end
+
+  # --- Queue/Schedule helpers ---
+
+  defp queue_count_for(agent_queues, agent_name) do
+    agent_queues |> Map.get(agent_name, []) |> length()
+  end
+
+  defp scheduled_count_for(scheduled_messages, agent_name) do
+    Enum.count(scheduled_messages, &(&1[:target_agent] == agent_name))
+  end
+
+  defp agent_is_working?(agent_cards, agent_name) do
+    case Map.get(agent_cards, agent_name) do
+      %{status: :working} -> true
+      _ -> false
     end
   end
 end

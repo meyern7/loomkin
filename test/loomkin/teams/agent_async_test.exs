@@ -2,6 +2,7 @@ defmodule Loomkin.Teams.AgentAsyncTest do
   use ExUnit.Case, async: false
 
   alias Loomkin.Teams.Agent
+  alias Loomkin.Teams.QueuedMessage
 
   defp unique_team_id do
     "test-async-#{:erlang.unique_integer([:positive])}"
@@ -119,8 +120,13 @@ defmodule Loomkin.Teams.AgentAsyncTest do
       Process.sleep(50)
 
       state = :sys.get_state(pid)
-      assert length(state.pending_updates) == 1
-      assert {:context_update, "peer-1", %{info: "test"}} in state.pending_updates
+      matching =
+        Enum.filter(state.pending_updates, fn qm ->
+          qm.content == {:context_update, "peer-1", %{info: "test"}}
+        end)
+
+      assert length(matching) == 1
+      assert %QueuedMessage{priority: :normal} = hd(matching)
       assert state.priority_queue == []
     end
 
@@ -193,8 +199,11 @@ defmodule Loomkin.Teams.AgentAsyncTest do
 
       # Warning should be queued as inject_system_message (not in messages yet)
       assert Enum.any?(state.priority_queue, fn
-               {:inject_system_message, content} -> String.contains?(content, "File conflict")
-               _ -> false
+               %QueuedMessage{content: {:inject_system_message, content}} ->
+                 String.contains?(content, "File conflict")
+
+               _ ->
+                 false
              end)
     end
 
@@ -205,14 +214,19 @@ defmodule Loomkin.Teams.AgentAsyncTest do
       fake_task = %Task{pid: self(), ref: ref, owner: self(), mfa: {__MODULE__, :fake, []}}
 
       # Simulate active loop with a queued file_conflict inject
+      conflict_qm =
+        QueuedMessage.new(
+          {:inject_system_message, "[URGENT] File conflict detected: %{file: \"lib/foo.ex\"}"},
+          priority: :urgent,
+          source: :system
+        )
+
       :sys.replace_state(pid, fn state ->
         %{
           state
           | loop_task: {fake_task, nil},
             status: :working,
-            priority_queue: [
-              {:inject_system_message, "[URGENT] File conflict detected: %{file: \"lib/foo.ex\"}"}
-            ]
+            priority_queue: [conflict_qm]
         }
       end)
 
@@ -343,13 +357,19 @@ defmodule Loomkin.Teams.AgentAsyncTest do
       ref = make_ref()
       fake_task = %Task{pid: self(), ref: ref, owner: self(), mfa: {__MODULE__, :fake, []}}
 
+      pending_qm =
+        QueuedMessage.new({:context_update, "peer-1", %{v: 1}}, priority: :normal, source: :system)
+
+      priority_qm =
+        QueuedMessage.new({:tasks_unblocked, ["t1"]}, priority: :high, source: :system)
+
       :sys.replace_state(pid, fn state ->
         %{
           state
           | loop_task: {fake_task, nil},
             status: :working,
-            pending_updates: [{:context_update, "peer-1", %{v: 1}}],
-            priority_queue: [{:tasks_unblocked, ["t1"]}]
+            pending_updates: [pending_qm],
+            priority_queue: [priority_qm]
         }
       end)
 

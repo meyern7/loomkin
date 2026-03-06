@@ -99,4 +99,13 @@ defmodule Loomkin.Signals.Agent do
         new_role: [type: :atom, required: true]
       ]
   end
+
+  defmodule QueueUpdated do
+    use Jido.Signal,
+      type: "agent.queue.updated",
+      schema: [
+        agent_name: [type: :string, required: true],
+        team_id: [type: :string, required: true]
+      ]
+  end
 end
