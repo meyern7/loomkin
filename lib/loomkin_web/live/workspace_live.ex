@@ -72,25 +72,11 @@ defmodule LoomkinWeb.WorkspaceLive do
         last_user_message: nil
       )
 
-    project_path = File.cwd!()
-
     case socket.assigns.live_action do
-      :index ->
-        if params["new"] == "true" do
-          # Explicit new session — skip auto-resume
-          session_id = Ecto.UUID.generate()
-          {:ok, start_and_subscribe(socket, session_id)}
-        else
-          # Auto-resume the latest active session for this project
-          case Loomkin.Session.Persistence.find_latest_active_session(project_path) do
-            %{id: existing_id} ->
-              {:ok, push_navigate(socket, to: ~p"/sessions/#{existing_id}")}
-
-            nil ->
-              session_id = Ecto.UUID.generate()
-              {:ok, start_and_subscribe(socket, session_id)}
-          end
-        end
+      :new ->
+        project_path = params["project_path"] || File.cwd!()
+        session_id = Ecto.UUID.generate()
+        {:ok, start_and_subscribe(socket, session_id, project_path)}
 
       :show ->
         session_id = params["session_id"]
@@ -98,10 +84,10 @@ defmodule LoomkinWeb.WorkspaceLive do
     end
   end
 
-  defp start_and_subscribe(socket, session_id) do
+  defp start_and_subscribe(socket, session_id, project_path \\ nil) do
     # Use full lead tool set — every session is a team-capable lead agent
     tools = Loomkin.Tools.Registry.for_lead()
-    project_path = File.cwd!()
+    project_path = project_path || File.cwd!()
 
     Logger.debug(
       "[WorkspaceLive] start_and_subscribe session=#{session_id} connected=#{connected?(socket)}"
