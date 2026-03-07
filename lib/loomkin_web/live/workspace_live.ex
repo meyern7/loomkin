@@ -2545,11 +2545,7 @@ defmodule LoomkinWeb.WorkspaceLive do
               card={@focused_card}
               focused={true}
               team_id={@active_team_id}
-              queue_count={queue_count_for(@agent_queues, @focused_card.name)}
-              scheduled_count={scheduled_count_for(@scheduled_messages, @focused_card.name)}
               model={@focused_card[:model]}
-              budget_used={@focused_card[:budget_used] || 0}
-              budget_limit={@focused_card[:budget_limit] || 0}
             />
           </div>
         </div>
@@ -2563,11 +2559,7 @@ defmodule LoomkinWeb.WorkspaceLive do
             card={@agent_cards[name]}
             focused={false}
             team_id={@active_team_id}
-            queue_count={queue_count_for(@agent_queues, name)}
-            scheduled_count={scheduled_count_for(@scheduled_messages, name)}
             model={@agent_cards[name][:model]}
-            budget_used={@agent_cards[name][:budget_used] || 0}
-            budget_limit={@agent_cards[name][:budget_limit] || 0}
           />
         </div>
 
@@ -2633,11 +2625,7 @@ defmodule LoomkinWeb.WorkspaceLive do
                 card={@agent_cards[name]}
                 focused={false}
                 team_id={@active_team_id}
-                queue_count={queue_count_for(@agent_queues, name)}
-                scheduled_count={scheduled_count_for(@scheduled_messages, name)}
                 model={@agent_cards[name][:model]}
-                budget_used={@agent_cards[name][:budget_used] || 0}
-                budget_limit={@agent_cards[name][:budget_limit] || 0}
               />
             </div>
           <% end %>
@@ -3105,13 +3093,9 @@ defmodule LoomkinWeb.WorkspaceLive do
   defp tab_icon(:graph),
     do: raw("<span class=\"hero-share-mini inline-block w-3.5 h-3.5\"></span>")
 
-  defp tab_icon(:team),
-    do: raw("<span class=\"hero-user-group-mini inline-block w-3.5 h-3.5\"></span>")
-
   defp tab_label(:files), do: "Files"
   defp tab_label(:diff), do: "Diff"
   defp tab_label(:graph), do: "Graph"
-  defp tab_label(:team), do: "Kin"
 
   defp render_tab(:files, assigns) do
     ~H"""
@@ -3167,115 +3151,6 @@ defmodule LoomkinWeb.WorkspaceLive do
       id="decision-graph"
       session_id={@session_id}
       team_id={@active_team_id}
-    />
-    """
-  end
-
-  defp render_tab(:team, assigns) do
-    display_team_id = assigns[:active_team_id] || assigns[:team_id]
-    assigns = assign(assigns, :display_team_id, display_team_id)
-
-    ~H"""
-    <div class="flex flex-col h-full gap-3">
-      <%!-- Team switcher (visible when child teams exist) --%>
-      <div
-        :if={@child_teams != []}
-        class="flex items-center gap-1 flex-wrap border-b border-gray-800 pb-2"
-      >
-        <button
-          phx-click="switch_team"
-          phx-value-team-id={@team_id}
-          class={"text-xs px-2.5 py-1 rounded-lg font-medium transition " <>
-            if(@active_team_id == @team_id,
-              do: "bg-violet-600 text-white",
-              else: "bg-gray-800 text-gray-400 hover:text-gray-200")}
-        >
-          Lead
-        </button>
-        <button
-          :for={child_id <- @child_teams}
-          phx-click="switch_team"
-          phx-value-team-id={child_id}
-          class={"text-xs px-2.5 py-1 rounded-lg font-medium transition " <>
-            if(@active_team_id == child_id,
-              do: "bg-violet-600 text-white",
-              else: "bg-gray-800 text-gray-400 hover:text-gray-200")}
-        >
-          {short_team_id(child_id)}
-        </button>
-      </div>
-
-      <.live_component
-        module={LoomkinWeb.TeamDashboardComponent}
-        id="team-dashboard"
-        team_id={@display_team_id}
-      />
-
-      <div class="flex items-center gap-1 border-b border-gray-800 pb-1">
-        <button
-          :for={sub <- [:activity, :cost, :graph]}
-          phx-click="switch_sub_tab"
-          phx-value-tab={sub}
-          class={"px-3 py-1.5 text-xs font-medium rounded-lg transition-all duration-200 " <>
-            if(@team_sub_tab == sub,
-              do: "bg-gray-800 text-violet-400",
-              else: "text-gray-500 hover:text-gray-300 hover:bg-gray-800/40")}
-        >
-          {team_sub_tab_label(sub)}
-        </button>
-        <span
-          :if={@collab_health}
-          class="ml-auto flex items-center gap-1 text-xs"
-          title={"Collaboration health: #{@collab_health}/100"}
-        >
-          <span class={"inline-block w-2 h-2 rounded-full " <> collab_health_color(@collab_health)} />
-          <span class="text-gray-500">{@collab_health}</span>
-        </span>
-      </div>
-
-      <%!-- Activity feed: always mounted, hidden when not selected --%>
-      <div class={if @team_sub_tab == :activity, do: "flex-1 overflow-auto", else: "hidden"}>
-        <.live_component
-          module={LoomkinWeb.TeamActivityComponent}
-          id="team-activity"
-          team_id={@display_team_id}
-          known_agents={@activity_known_agents}
-        />
-      </div>
-
-      <%!-- Other sub-tab content --%>
-      <div :if={@team_sub_tab != :activity} class="flex-1 overflow-auto">
-        {render_team_sub_tab(@team_sub_tab, assigns)}
-      </div>
-    </div>
-    """
-  end
-
-  defp team_sub_tab_label(:activity), do: "Activity"
-  defp team_sub_tab_label(:cost), do: "Cost"
-  defp team_sub_tab_label(:graph), do: "Graph"
-
-  defp collab_health_color(score) when score >= 70, do: "bg-green-400"
-  defp collab_health_color(score) when score >= 40, do: "bg-yellow-400"
-  defp collab_health_color(_score), do: "bg-red-400"
-
-  defp render_team_sub_tab(:cost, assigns) do
-    ~H"""
-    <.live_component
-      module={LoomkinWeb.TeamCostComponent}
-      id="team-cost"
-      team_id={@display_team_id}
-    />
-    """
-  end
-
-  defp render_team_sub_tab(:graph, assigns) do
-    ~H"""
-    <.live_component
-      module={LoomkinWeb.DecisionGraphComponent}
-      id="team-decision-graph"
-      session_id={@session_id}
-      team_id={@display_team_id}
     />
     """
   end
@@ -3884,11 +3759,8 @@ defmodule LoomkinWeb.WorkspaceLive do
     }
   end
 
-  defp activity_event_from({:task_started, _task_id, _agent}) do
-    nil
-    # Task start is redundant with task_assigned — skip to reduce noise
-    |> then(fn _ -> nil end)
-  end
+  # Task start is redundant with task_assigned — skip to reduce noise
+  defp activity_event_from({:task_started, _task_id, _agent}), do: nil
 
   defp activity_event_from({:task_completed, _task_id, agent, result}) do
     content =
@@ -4845,16 +4717,6 @@ defmodule LoomkinWeb.WorkspaceLive do
       _e ->
         []
     end
-  end
-
-  # --- Queue/Schedule helpers ---
-
-  defp queue_count_for(agent_queues, agent_name) do
-    agent_queues |> Map.get(agent_name, []) |> length()
-  end
-
-  defp scheduled_count_for(scheduled_messages, agent_name) do
-    Enum.count(scheduled_messages, &(&1.target_agent == agent_name))
   end
 
   defp agent_is_working?(agent_cards, agent_name) do

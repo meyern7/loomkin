@@ -783,7 +783,7 @@ body {
 .event-card-error { border-left: 2px solid #f87171; }
 .event-card-spawn { border-left: 2px solid #4ade80; }
 .event-card-context { border-left: 2px solid #a78bfa; }
-.event-card-streaming { border-left: 2px solid #818cf8; animation: pulse-border 2s infinite; }
+.event-card-streaming { border-left: 2px solid #818cf8; animation: pulse-border 2s ease-in-out infinite; }
 
 /* ══════════════════════════════════════════
    File Preview - Syntax Highlighting
@@ -1025,4 +1025,15 @@ body {
   );
   background-size: 200% 100%;
   animation: shimmer 2s linear infinite;
+}
+
+/* ══════════════════════════════════════════
+   Reduced Motion — Accessibility
+   ══════════════════════════════════════════ */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

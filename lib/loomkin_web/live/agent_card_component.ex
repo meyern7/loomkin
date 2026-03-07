@@ -23,17 +23,14 @@ defmodule LoomkinWeb.AgentCardComponent do
   }
   @default_tool_config %{icon: "⚙", color: "#71717a"}
 
+  @impl true
   def mount(socket) do
     {:ok,
      assign(socket,
        card: nil,
        focused: false,
        team_id: nil,
-       queue_count: 0,
-       scheduled_count: 0,
        model: nil,
-       budget_used: 0,
-       budget_limit: 0,
        rendered_content: "",
        prev_content: nil,
        prev_content_type: nil,
@@ -41,6 +38,7 @@ defmodule LoomkinWeb.AgentCardComponent do
      )}
   end
 
+  @impl true
   def update(assigns, socket) do
     socket = assign(socket, assigns)
 
@@ -71,6 +69,7 @@ defmodule LoomkinWeb.AgentCardComponent do
     {:ok, socket}
   end
 
+  @impl true
   def render(assigns) do
     ~H"""
     <div
@@ -325,7 +324,7 @@ defmodule LoomkinWeb.AgentCardComponent do
 
   defp card_border_style(:tool_call, %{name: name}) when is_binary(name) do
     color = tool_config(name).color
-    "border-color: #{color}; box-shadow: 0 0 10px #{color}1a;"
+    "border-color: #{color}; box-shadow: 0 0 10px #{hex_to_rgba(color, 0.1)};"
   end
 
   defp card_border_style(_content_type, _last_tool), do: nil
@@ -431,4 +430,10 @@ defmodule LoomkinWeb.AgentCardComponent do
   end
 
   defp format_model(_), do: ""
+
+  defp hex_to_rgba("#" <> <<r::binary-size(2), g::binary-size(2), b::binary-size(2)>>, alpha) do
+    "rgba(#{String.to_integer(r, 16)}, #{String.to_integer(g, 16)}, #{String.to_integer(b, 16)}, #{alpha})"
+  end
+
+  defp hex_to_rgba(color, _alpha), do: color
 end
