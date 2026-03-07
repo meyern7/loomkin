@@ -221,8 +221,7 @@ defmodule Loomkin.Teams.Agent do
   def handle_continue(:auto_orient, state) do
     require Logger
     Logger.info("[Kin:agent] orienter auto-orient starting team=#{state.team_id}")
-    state = set_status(state, :working)
-    broadcast_team(state, {:agent_status, state.name, :working})
+    state = set_status_and_broadcast(state, :working)
 
     orientation_prompt = """
     Begin your orientation scan now. Follow your scanning protocol:
@@ -261,12 +260,10 @@ defmodule Loomkin.Teams.Agent do
       "[Kin:agent] #{state.name} received message, loop_active=#{state.loop_task != nil}"
     )
 
-    state = set_status(state, :working)
+    state = set_status_and_broadcast(state, :working)
 
     user_message = %{role: :user, content: text}
     messages = state.messages ++ [user_message]
-
-    broadcast_team(state, {:agent_status, state.name, :working})
 
     loop_opts = build_loop_opts(state)
     snapshot = build_snapshot(state)
@@ -330,15 +327,13 @@ defmodule Loomkin.Teams.Agent do
             priority_queue: []
         }
 
-        state = set_status(state, :idle)
-        broadcast_team(state, {:agent_status, state.name, :idle})
+        state = set_status_and_broadcast(state, :idle)
         {:reply, :ok, state}
 
       nil when state.pending_permission != nil ->
         # Agent is waiting on permission — clear it and go idle
         state = %{state | pending_permission: nil, pending_updates: [], priority_queue: []}
-        state = set_status(state, :idle)
-        broadcast_team(state, {:agent_status, state.name, :idle})
+        state = set_status_and_broadcast(state, :idle)
         {:reply, :ok, state}
 
       nil when state.status == :paused ->
@@ -351,8 +346,7 @@ defmodule Loomkin.Teams.Agent do
             priority_queue: []
         }
 
-        state = set_status(state, :idle)
-        broadcast_team(state, {:agent_status, state.name, :idle})
+        state = set_status_and_broadcast(state, :idle)
         {:reply, :ok, state}
 
       nil ->
@@ -576,8 +570,7 @@ defmodule Loomkin.Teams.Agent do
         messages: messages
     }
 
-    state = set_status(state, :working)
-    broadcast_team(state, {:agent_status, state.name, :working})
+    state = set_status_and_broadcast(state, :working)
 
     loop_opts = build_loop_opts(state)
     snapshot = build_snapshot(state)
@@ -674,14 +667,12 @@ defmodule Loomkin.Teams.Agent do
         state = track_usage(state, meta)
 
         # Orienter is one-shot: mark complete instead of idle after auto-orient
-        {final_status, state} =
+        state =
           if state.role == :orienter and is_nil(from) do
-            {:complete, set_status(state, :complete)}
+            set_status_and_broadcast(state, :complete)
           else
-            {:idle, set_status(state, :idle)}
+            set_status_and_broadcast(state, :idle)
           end
-
-        broadcast_team(state, {:agent_status, state.name, final_status})
 
         if from do
           GenServer.reply(from, {:ok, text})
@@ -710,14 +701,12 @@ defmodule Loomkin.Teams.Agent do
         state = track_usage(state, meta)
 
         # Orienter is one-shot: mark complete instead of idle after auto-orient
-        {final_status, state} =
+        state =
           if state.role == :orienter and is_nil(from) do
-            {:complete, set_status(state, :complete)}
+            set_status_and_broadcast(state, :complete)
           else
-            {:idle, set_status(state, :idle)}
+            set_status_and_broadcast(state, :idle)
           end
-
-        broadcast_team(state, {:agent_status, state.name, final_status})
 
         if from do
           GenServer.reply(from, {:ok, text})
@@ -741,8 +730,7 @@ defmodule Loomkin.Teams.Agent do
         task_id = state.task && state.task[:id]
 
         state = %{state | messages: msgs, loop_task: nil}
-        state = set_status(state, :idle)
-        broadcast_team(state, {:agent_status, state.name, :idle})
+        state = set_status_and_broadcast(state, :idle)
 
         if from do
           GenServer.reply(from, {:error, reason})
@@ -796,8 +784,7 @@ defmodule Loomkin.Teams.Agent do
             paused_state: paused_state
         }
 
-        state = set_status(state, :paused)
-        broadcast_team(state, {:agent_status, state.name, :paused})
+        state = set_status_and_broadcast(state, :paused)
 
         if from, do: GenServer.reply(from, {:ok, :paused})
 
@@ -815,8 +802,7 @@ defmodule Loomkin.Teams.Agent do
         task_id = state.task && state.task[:id]
 
         state = %{state | loop_task: nil}
-        state = set_status(state, :idle)
-        broadcast_team(state, {:agent_status, state.name, :idle})
+        state = set_status_and_broadcast(state, :idle)
 
         if from do
           GenServer.reply(from, {:error, :crashed})
@@ -1072,8 +1058,7 @@ defmodule Loomkin.Teams.Agent do
       task = state.task
       description = task[:description] || task[:title] || "Complete task #{task_id}"
 
-      state = set_status(state, :working)
-      broadcast_team(state, {:agent_status, state.name, :working})
+      state = set_status_and_broadcast(state, :working)
 
       user_message = %{role: :user, content: description}
       messages = state.messages ++ [user_message]
@@ -1308,8 +1293,7 @@ defmodule Loomkin.Teams.Agent do
 
     state = %{state | messages: messages, failure_count: 0}
     state = track_usage(state, metadata)
-    state = set_status(state, :idle)
-    broadcast_team(state, {:agent_status, state.name, :idle})
+    state = set_status_and_broadcast(state, :idle)
 
     # If there's an active task, complete it with the response
     if task_id do
@@ -1322,8 +1306,7 @@ defmodule Loomkin.Teams.Agent do
   @impl true
   def handle_info({:loop_resumed, {:error, _reason, messages}}, state) do
     state = %{state | messages: messages}
-    state = set_status(state, :idle)
-    broadcast_team(state, {:agent_status, state.name, :idle})
+    state = set_status_and_broadcast(state, :idle)
     {:noreply, drain_queues(state)}
   end
 
@@ -1345,8 +1328,7 @@ defmodule Loomkin.Teams.Agent do
         paused_state: paused_state
     }
 
-    state = set_status(state, :paused)
-    broadcast_team(state, {:agent_status, state.name, :paused})
+    state = set_status_and_broadcast(state, :paused)
     {:noreply, drain_queues(state)}
   end
 
@@ -1769,8 +1751,7 @@ defmodule Loomkin.Teams.Agent do
         if task_id, do: Loomkin.Teams.Tasks.fail_task(task_id, "aborted")
         if from, do: GenServer.reply(from, {:error, :aborted})
         state = %{state | loop_task: nil, pending_updates: [], priority_queue: []}
-        state = set_status(state, :idle)
-        broadcast_team(state, {:agent_status, state.name, :idle})
+        state = set_status_and_broadcast(state, :idle)
         {:noreply, state}
 
       _ ->
@@ -1786,8 +1767,7 @@ defmodule Loomkin.Teams.Agent do
         if from, do: GenServer.reply(from, {:error, :budget_exceeded})
         if !from && task_id, do: Loomkin.Teams.Tasks.fail_task(task_id, "budget exceeded")
         state = %{state | loop_task: nil, pending_updates: [], priority_queue: []}
-        state = set_status(state, :idle)
-        broadcast_team(state, {:agent_status, state.name, :idle})
+        state = set_status_and_broadcast(state, :idle)
         {:noreply, state}
 
       _ ->
@@ -2231,6 +2211,19 @@ defmodule Loomkin.Teams.Agent do
     Context.update_agent_status(state.team_id, state.name, new_status)
 
     %{state | status: new_status}
+  end
+
+  # Sets status and broadcasts only when the status actually changed.
+  # This prevents duplicate `:agent_status` signals when multiple code paths
+  # set the same status (e.g., :working broadcast from both send_message and execute_task).
+  defp set_status_and_broadcast(state, new_status) do
+    if state.status == new_status do
+      state
+    else
+      state = set_status(state, new_status)
+      broadcast_team(state, {:agent_status, state.name, new_status})
+      state
+    end
   end
 
   defp handle_peer_message_signal(sig, state) do
