@@ -266,7 +266,7 @@ defmodule LoomkinWeb.WorkspaceLive do
 
     socket =
       assign(socket,
-        activity_known_agents: Enum.uniq(socket.assigns.activity_known_agents ++ known_agents),
+        activity_known_agents: Enum.uniq(known_agents ++ socket.assigns.activity_known_agents),
         activity_event_count: length(history_events)
       )
 
@@ -397,6 +397,7 @@ defmodule LoomkinWeb.WorkspaceLive do
             socket
           end
 
+        # Append preserves chronological order required by ChatComponent stream diffing
         updated_messages = Enum.take(socket.assigns.messages ++ [user_msg], -@max_messages)
 
         # Auto-title page from first user message
@@ -973,6 +974,9 @@ defmodule LoomkinWeb.WorkspaceLive do
 
   # --- Schedule Messages ---
 
+  # Server roundtrip is required here because schedule_popover is also reset from
+  # close_scheduler (phx-click-away) and schedule_message handlers, and the assign
+  # drives conditional button styling in the template. A pure JS.toggle would desync.
   def handle_event("toggle_scheduler", _params, socket) do
     {:noreply, assign(socket, schedule_popover: !socket.assigns.schedule_popover)}
   end
@@ -1308,6 +1312,7 @@ defmodule LoomkinWeb.WorkspaceLive do
   end
 
   def handle_info({:new_message, _session_id, msg}, socket) do
+    # Append preserves chronological order required by ChatComponent stream diffing
     socket = assign(socket, messages: Enum.take(socket.assigns.messages ++ [msg], -@max_messages))
 
     # Also add assistant messages to activity feed for mission control mode
@@ -1362,6 +1367,8 @@ defmodule LoomkinWeb.WorkspaceLive do
       |> forward_to_activity(event)
       |> forward_to_cards_and_comms(event)
       |> maybe_auto_follow(source, %{tool_name: name, path: target})
+      # current_tool includes target path for component display (e.g. "read: /path/to/file"),
+      # current_tool_name is the raw tool name used by status_label in the status pill.
       |> assign(current_tool: display, current_tool_name: name)
 
     {:noreply, socket}
@@ -1388,14 +1395,14 @@ defmodule LoomkinWeb.WorkspaceLive do
       socket
       |> forward_to_activity(event)
       |> forward_to_cards_and_comms(event)
-      |> assign(current_tool: nil)
+      |> assign(current_tool: nil, current_tool_name: nil)
 
     {:noreply, socket}
   end
 
   # Session tool_complete (4-element tuple with result)
   def handle_info({:tool_complete, _session_id, tool_name, result}, socket) do
-    socket = assign(socket, current_tool: nil)
+    socket = assign(socket, current_tool: nil, current_tool_name: nil)
 
     # Bump file tree version when file-modifying tools complete
     socket =
@@ -1409,11 +1416,13 @@ defmodule LoomkinWeb.WorkspaceLive do
       cond do
         tool_name in ["file_edit", "file_write"] ->
           diff = LoomkinWeb.DiffComponent.parse_edit_result(result)
+          # Append preserves chronological order required by DiffComponent rendering
           assign(socket, diffs: Enum.take(socket.assigns.diffs ++ [diff], -@max_diffs))
 
         tool_name == "shell" ->
           cmd = parse_shell_result(result)
 
+          # Append preserves chronological order required by TerminalComponent rendering
           assign(socket,
             shell_commands:
               Enum.take(socket.assigns.shell_commands ++ [cmd], -@max_shell_commands)
@@ -1491,7 +1500,7 @@ defmodule LoomkinWeb.WorkspaceLive do
       if child_team_id in socket.assigns.child_teams do
         socket.assigns.child_teams
       else
-        socket.assigns.child_teams ++ [child_team_id]
+        [child_team_id | socket.assigns.child_teams]
       end
 
     socket =
@@ -1593,6 +1602,7 @@ defmodule LoomkinWeb.WorkspaceLive do
        input_text: "",
        async_task: task,
        status: :thinking,
+       # Append preserves chronological order required by ChatComponent stream diffing
        messages: Enum.take(socket.assigns.messages ++ [user_msg], -@max_messages)
      )
      |> push_event("clear-input", %{})}
@@ -1902,7 +1912,7 @@ defmodule LoomkinWeb.WorkspaceLive do
       if child_team_id in socket.assigns.child_teams do
         socket.assigns.child_teams
       else
-        socket.assigns.child_teams ++ [child_team_id]
+        [child_team_id | socket.assigns.child_teams]
       end
 
     existing_card_names = Map.keys(socket.assigns.agent_cards)
@@ -2137,7 +2147,7 @@ defmodule LoomkinWeb.WorkspaceLive do
   # --- Ask User questions from agents ---
 
   def handle_info({:ask_user_question, question}, socket) do
-    questions = socket.assigns.pending_questions ++ [question]
+    questions = [question | socket.assigns.pending_questions]
 
     event = %{
       id: Ecto.UUID.generate(),
@@ -3540,7 +3550,14 @@ defmodule LoomkinWeb.WorkspaceLive do
     signal_team_id == nil or MapSet.member?(subscribed_teams, signal_team_id)
   end
 
-  # Subscribe to all global wildcard signal bus topics exactly once per LiveView process.
+  # Subscribe to global wildcard signal bus topics exactly once per LiveView process.
+  #
+  # Signal types use static paths (e.g. "agent.status", "team.task.completed") without
+  # team_id embedded in the topic, so we cannot scope subscriptions to a specific team.
+  # Instead, every signal is delivered to every LiveView and filtered at dispatch time
+  # via `signal_for_workspace?/2` which checks `signal.data.team_id` against
+  # `socket.assigns.subscribed_teams`.
+  #
   # These are process-level (PID) subscriptions, so calling them multiple times
   # results in duplicate signal delivery. The guard prevents re-subscription.
   defp subscribe_global_signals(socket) do
@@ -3602,7 +3619,7 @@ defmodule LoomkinWeb.WorkspaceLive do
             metadata: %{agent_name: agent.name, role: agent.role}
           }
 
-          new_known = sock.assigns.activity_known_agents ++ [agent.name]
+          new_known = [agent.name | sock.assigns.activity_known_agents]
 
           sock
           |> push_activity_event(event)
@@ -3737,7 +3754,7 @@ defmodule LoomkinWeb.WorkspaceLive do
 
           socket
           |> push_activity_event(event)
-          |> assign(activity_known_agents: known ++ [agent])
+          |> assign(activity_known_agents: [agent | known])
         end
 
       event ->
@@ -3746,7 +3763,7 @@ defmodule LoomkinWeb.WorkspaceLive do
         agents =
           case trackable_agent_name(event.agent) do
             nil -> agents
-            name -> if name in agents, do: agents, else: agents ++ [name]
+            name -> if name in agents, do: agents, else: [name | agents]
           end
 
         # Track pending tool events for stream-based merging
@@ -3771,7 +3788,7 @@ defmodule LoomkinWeb.WorkspaceLive do
     agents =
       case trackable_agent_name(event.agent) do
         nil -> agents
-        name -> if name in agents, do: agents, else: agents ++ [name]
+        name -> if name in agents, do: agents, else: [name | agents]
       end
 
     socket
