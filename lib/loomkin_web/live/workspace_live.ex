@@ -2279,9 +2279,6 @@ defmodule LoomkinWeb.WorkspaceLive do
             <circle cx="12" cy="14" r="3" fill="#F59E0B" />
             <circle cx="20" cy="14" r="3" fill="#F59E0B" />
           </svg>
-          <span class="text-[13px] font-medium bg-gradient-to-r from-violet-400/80 to-purple-400/80 bg-clip-text text-transparent tracking-tight hidden sm:inline">
-            Loomkin
-          </span>
         </a>
 
         <%!-- Thinking model selector --%>
