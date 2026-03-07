@@ -108,19 +108,19 @@ defmodule LoomkinWeb.TeamDashboardComponent do
         %Jido.Signal{type: "team.task.assigned", data: %{agent_name: agent_name}},
         socket
       ) do
-    {:noreply, reload_tasks(socket, agent_name)}
+    {:noreply, schedule_reload(socket, agent_name)}
   end
 
   def handle_info(%Jido.Signal{type: "team.task.completed", data: %{owner: owner}}, socket) do
-    {:noreply, reload_tasks(socket, owner)}
+    {:noreply, schedule_reload(socket, owner)}
   end
 
   def handle_info(%Jido.Signal{type: "team.task.started", data: %{owner: owner}}, socket) do
-    {:noreply, reload_tasks(socket, owner)}
+    {:noreply, schedule_reload(socket, owner)}
   end
 
   def handle_info(%Jido.Signal{type: "team.task.failed", data: %{owner: owner}}, socket) do
-    {:noreply, reload_tasks(socket, owner)}
+    {:noreply, schedule_reload(socket, owner)}
   end
 
   def handle_info(
@@ -139,11 +139,7 @@ defmodule LoomkinWeb.TeamDashboardComponent do
   end
 
   def handle_info(%Jido.Signal{type: "agent.escalation", data: %{agent_name: agent_name}}, socket) do
-    # Escalation may affect budget — reload cost data
-    summary = CostTracker.team_cost_summary(socket.assigns.team_id)
-    spent = to_float(summary.total_cost_usd)
-    budget_limit = socket.assigns.budget[:limit] || 5.0
-
+    # Escalation may affect budget — schedule debounced reload
     agents =
       Enum.map(socket.assigns.agents, fn agent ->
         if agent.name == agent_name, do: %{agent | status: :working}, else: agent
@@ -152,11 +148,27 @@ defmodule LoomkinWeb.TeamDashboardComponent do
     {:noreply,
      socket
      |> assign(:agents, agents)
-     |> assign(:budget, %{spent: spent, limit: budget_limit})}
+     |> schedule_reload(agent_name)}
+  end
+
+  def handle_info({:reload_dashboard, agent_name}, socket) do
+    {:noreply,
+     socket
+     |> assign(:reload_timer, nil)
+     |> reload_tasks(agent_name)}
   end
 
   def handle_info(_msg, socket) do
     {:noreply, socket}
+  end
+
+  defp schedule_reload(socket, agent_name) do
+    if timer = socket.assigns[:reload_timer] do
+      Process.cancel_timer(timer)
+    end
+
+    timer = Process.send_after(self(), {:reload_dashboard, agent_name}, 500)
+    assign(socket, :reload_timer, timer)
   end
 
   defp reload_tasks(socket, agent_name) do

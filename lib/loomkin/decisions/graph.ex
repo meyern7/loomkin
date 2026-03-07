@@ -146,6 +146,12 @@ defmodule Loomkin.Decisions.Graph do
     query |> where([e], e.to_node_id == ^id) |> apply_edge_filters(rest)
   end
 
+  defp apply_edge_filters(query, [{:node_ids, ids} | rest]) when is_list(ids) do
+    query
+    |> where([e], e.from_node_id in ^ids or e.to_node_id in ^ids)
+    |> apply_edge_filters(rest)
+  end
+
   defp apply_edge_filters(query, [_ | rest]), do: apply_edge_filters(query, rest)
 
   # --- Convenience ---

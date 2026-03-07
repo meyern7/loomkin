@@ -12,12 +12,13 @@ defmodule LoomkinWeb.SessionSwitcherComponent do
       |> assign(assigns)
       |> assign_new(:dropdown_open, fn -> false end)
       |> assign_new(:show_all_projects, fn -> false end)
+      |> assign_new(:sessions, fn -> [] end)
 
     project_path = socket.assigns[:project_path]
     show_all = socket.assigns[:show_all_projects]
 
     if project_path != prev_project_path or show_all != prev_show_all or
-         !Map.has_key?(socket.assigns, :sessions) do
+         socket.assigns.sessions == [] do
       sessions =
         if show_all || is_nil(project_path) do
           list_all_sessions()

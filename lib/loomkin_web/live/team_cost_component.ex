@@ -53,6 +53,13 @@ defmodule LoomkinWeb.TeamCostComponent do
     # Per-agent usage from ETS
     agent_usage = CostTracker.get_team_usage(team_id)
 
+    # Fetch call history once per agent, reuse for model breakdown and timeline
+    all_calls =
+      agent_usage
+      |> Enum.flat_map(fn {name, _usage} ->
+        CostTracker.get_call_history(team_id, name)
+      end)
+
     agent_costs =
       agent_usage
       |> Enum.map(fn {name, usage} ->
@@ -68,12 +75,9 @@ defmodule LoomkinWeb.TeamCostComponent do
       end)
       |> Enum.sort_by(& &1.total_tokens, :desc)
 
-    # Model breakdown: aggregate across agents
+    # Model breakdown: aggregate across agents (reuse all_calls)
     model_costs =
-      agent_usage
-      |> Enum.flat_map(fn {name, _usage} ->
-        CostTracker.get_call_history(team_id, name)
-      end)
+      all_calls
       |> Enum.group_by(fn call -> call[:model] || "unknown" end)
       |> Enum.map(fn {model, calls} ->
         %{
@@ -92,11 +96,6 @@ defmodule LoomkinWeb.TeamCostComponent do
 
     # Escalation events
     escalations = CostTracker.list_escalations(team_id)
-
-    # Cost timeline: bucket all calls into 10 time intervals
-    all_calls =
-      agent_usage
-      |> Enum.flat_map(fn {name, _} -> CostTracker.get_call_history(team_id, name) end)
 
     timeline = build_timeline(all_calls)
 

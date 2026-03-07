@@ -766,7 +766,8 @@ defmodule LoomkinWeb.DecisionGraphComponent do
         end
 
       nodes = Enum.uniq_by(session_nodes ++ team_nodes, & &1.id)
-      edges = Graph.list_edges([])
+      node_ids = Enum.map(nodes, & &1.id)
+      edges = Graph.list_edges(node_ids: node_ids)
       pulse = maybe_generate_pulse(socket)
       {nodes, edges, pulse}
     rescue
